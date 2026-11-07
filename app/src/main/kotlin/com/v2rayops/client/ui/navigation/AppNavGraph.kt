@@ -8,6 +8,7 @@ import androidx.navigation.compose.composable
 import com.v2rayops.client.auth.ui.LoginScreen
 import com.v2rayops.client.settings.ui.SettingsScreen
 import com.v2rayops.client.ui.dashboard.DashboardScreen
+import com.v2rayops.client.ui.logs.DevLogsScreen
 import com.v2rayops.client.ui.servers.ServerSelectionScreen
 import com.v2rayops.client.ui.splash.SplashScreen
 
@@ -62,6 +63,9 @@ fun AppNavGraph(
                 },
                 onNavigateToSettings = {
                     navController.navigate(Screen.Settings.route)
+                },
+                onNavigateToLogs = {
+                    navController.navigate(Screen.Logs.route)
                 }
             )
         }
@@ -79,10 +83,21 @@ fun AppNavGraph(
                 onBackClick = {
                     navController.popBackStack()
                 },
+                onNavigateToLogs = {
+                    navController.navigate(Screen.Logs.route)
+                },
                 onLogoutSuccess = {
                     navController.navigate(Screen.Login.route) {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
                     }
+                }
+            )
+        }
+
+        composable(Screen.Logs.route) {
+            DevLogsScreen(
+                onBackClick = {
+                    navController.popBackStack()
                 }
             )
         }

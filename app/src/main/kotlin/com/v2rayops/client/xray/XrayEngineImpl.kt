@@ -109,7 +109,11 @@ class XrayEngineImpl @Inject constructor(
                 }
 
                 override fun onEmitStatus(code: Long, message: String?): Long {
-                    AppLogger.d(TAG, "CoreCallbackHandler: status emit [$code]: $message")
+                    if (!message.isNullOrBlank()) {
+                        AppLogger.i("XrayCore", "[$code] $message")
+                    } else {
+                        AppLogger.d("XrayCore", "status emit [$code]")
+                    }
                     return 0L
                 }
             }

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -57,6 +58,7 @@ import com.v2rayops.client.ui.dashboard.components.StatsCard
 fun DashboardScreen(
     onNavigateToServers: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToLogs: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -96,6 +98,13 @@ fun DashboardScreen(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh",
                             tint = CyberTextPrimary
+                        )
+                    }
+                    IconButton(onClick = onNavigateToLogs) {
+                        Icon(
+                            imageVector = Icons.Default.Terminal,
+                            contentDescription = "Dev Logs",
+                            tint = CyberAccent
                         )
                     }
                     IconButton(onClick = onNavigateToSettings) {
@@ -233,7 +242,8 @@ fun DashboardScreen(
                     result = diagnosticResult,
                     isTesting = isTestingConnection,
                     isVpnConnected = connectionState.isConnected,
-                    onRunTest = { viewModel.runConnectionTest() }
+                    onRunTest = { viewModel.runConnectionTest() },
+                    onViewLogsClick = onNavigateToLogs
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
