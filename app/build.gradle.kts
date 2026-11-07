@@ -111,6 +111,9 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.security.crypto)
 
+    // Xray Core Native Engine (AndroidLibXrayLite)
+    implementation(files("libs/libv2ray.aar"))
+
     // Coroutines
     implementation(libs.coroutines.core)
     implementation(libs.coroutines.android)

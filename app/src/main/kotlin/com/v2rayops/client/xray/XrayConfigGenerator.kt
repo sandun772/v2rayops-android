@@ -160,6 +160,17 @@ class XrayConfigGenerator @Inject constructor(
         }
         root.put("routing", routing)
 
+        // 6. Real-Time Outbound Traffic Statistics & System Policy
+        root.put("stats", JSONObject())
+        val policy = JSONObject().apply {
+            val system = JSONObject().apply {
+                put("statsOutboundUplink", true)
+                put("statsOutboundDownlink", true)
+            }
+            put("system", system)
+        }
+        root.put("policy", policy)
+
         return root.toString(2)
     }
 }

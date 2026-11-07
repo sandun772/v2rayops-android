@@ -9,12 +9,16 @@ import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.domain.repository.SettingsRepository
 import com.v2rayops.client.xray.XrayConfigGenerator
 import com.v2rayops.client.xray.XrayEngine
+import com.v2rayops.client.xray.XrayState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,6 +31,10 @@ class VpnManager @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val dispatchers: AppDispatchers
 ) {
+    companion object {
+        private const val TAG = "VpnManager"
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + dispatchers.default)
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -35,41 +43,63 @@ class VpnManager @Inject constructor(
     private val _trafficStats = MutableStateFlow(TrafficStats())
     val trafficStats: StateFlow<TrafficStats> = _trafficStats.asStateFlow()
 
+    private var currentServer: ServerNode? = null
+    private var statsJob: Job? = null
+
+    init {
+        // Observe Xray engine state reactively
+        scope.launch {
+            xrayEngine.state.collect { xrayState ->
+                when (xrayState) {
+                    is XrayState.Running -> {
+                        val srv = currentServer
+                        val now = xrayState.startedAtMs
+                        _connectionState.value = ConnectionState.Connected(
+                            serverName = srv?.displayName ?: "V2RayOps Node",
+                            serverEndpoint = srv?.displayEndpoint ?: "v2rayops.vpnxhub.com",
+                            connectedSinceMs = now
+                        )
+                        startTrafficPolling()
+                    }
+                    is XrayState.Starting -> {
+                        val srv = currentServer
+                        _connectionState.value = ConnectionState.Connecting(
+                            serverName = srv?.displayName ?: "V2RayOps Node"
+                        )
+                    }
+                    is XrayState.Stopped -> {
+                        stopTrafficPolling()
+                        if (_connectionState.value !is ConnectionState.Disconnected) {
+                            _connectionState.value = ConnectionState.Disconnected
+                        }
+                    }
+                    is XrayState.Error -> {
+                        stopTrafficPolling()
+                        _connectionState.value = ConnectionState.Error(xrayState.error)
+                    }
+                    is XrayState.BinaryPending -> {
+                        stopTrafficPolling()
+                        _connectionState.value = ConnectionState.Unavailable(xrayState.message)
+                    }
+                }
+            }
+        }
+    }
+
     fun connect(server: ServerNode, config: VpnConfig) {
         scope.launch {
+            currentServer = server
             _connectionState.value = ConnectionState.Connecting(server.displayName)
-
-            // Honest check: If the native engine binary is pending (Phase 2), do not fake connection
-            if (!xrayEngine.isBinaryAvailable) {
-                AppLogger.i("VpnManager", "Engine binary is pending compilation (Phase 2)")
-                _connectionState.value = ConnectionState.Unavailable(
-                    "Xray Core native engine (libxray.so) will be compiled and linked in Phase 2. Foundation verified."
-                )
-                return@launch
-            }
 
             try {
                 val settings = settingsRepository.observeSettings().first()
                 val configJson = configGenerator.generateJson(config, settings)
 
-                vpnController.startService(server)
-                val result = xrayEngine.start(configJson)
-
-                if (result.isSuccess) {
-                    val now = System.currentTimeMillis()
-                    _connectionState.value = ConnectionState.Connected(
-                        serverName = server.displayName,
-                        serverEndpoint = server.displayEndpoint,
-                        connectedSinceMs = now
-                    )
-                } else {
-                    val err = result.exceptionOrNull()?.message ?: "Failed to start Xray tunnel"
-                    _connectionState.value = ConnectionState.Error(err)
-                    vpnController.stopService()
-                }
+                AppLogger.i(TAG, "Requesting VPN Service start with node: ${server.displayName}")
+                vpnController.startService(server, configJson)
             } catch (e: Exception) {
-                AppLogger.e("VpnManager", "Failed to connect", e)
-                _connectionState.value = ConnectionState.Error(e.message ?: "Connection error")
+                AppLogger.e(TAG, "Failed to initiate VPN connection", e)
+                _connectionState.value = ConnectionState.Error(e.message ?: "Failed to generate tunnel configuration")
                 vpnController.stopService()
             }
         }
@@ -77,11 +107,34 @@ class VpnManager @Inject constructor(
 
     fun disconnect() {
         scope.launch {
+            AppLogger.i(TAG, "Disconnect requested")
             _connectionState.value = ConnectionState.Disconnecting
-            xrayEngine.stop()
+            stopTrafficPolling()
             vpnController.stopService()
+            xrayEngine.stop()
             _connectionState.value = ConnectionState.Disconnected
             _trafficStats.value = TrafficStats()
+            currentServer = null
         }
+    }
+
+    private fun startTrafficPolling() {
+        statsJob?.cancel()
+        statsJob = scope.launch(dispatchers.io) {
+            while (isActive) {
+                try {
+                    val stats = xrayEngine.queryTrafficStats()
+                    _trafficStats.value = stats
+                } catch (t: Throwable) {
+                    AppLogger.w(TAG, "Error polling traffic stats: ${t.message}")
+                }
+                delay(1000L)
+            }
+        }
+    }
+
+    private fun stopTrafficPolling() {
+        statsJob?.cancel()
+        statsJob = null
     }
 }

@@ -3,7 +3,7 @@ package com.v2rayops.client.di
 import com.v2rayops.client.vpn.VpnServiceController
 import com.v2rayops.client.vpn.VpnServiceControllerImpl
 import com.v2rayops.client.xray.XrayEngine
-import com.v2rayops.client.xray.XrayEngineStub
+import com.v2rayops.client.xray.XrayEngineImpl
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -16,7 +16,7 @@ abstract class VpnModule {
 
     @Binds
     @Singleton
-    abstract fun bindXrayEngine(impl: XrayEngineStub): XrayEngine
+    abstract fun bindXrayEngine(impl: XrayEngineImpl): XrayEngine
 
     @Binds
     @Singleton

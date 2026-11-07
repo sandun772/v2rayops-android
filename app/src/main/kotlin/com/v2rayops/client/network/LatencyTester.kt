@@ -23,4 +23,16 @@ class LatencyTester @Inject constructor(
                 null
             }
         }
+
+    /**
+     * Measures full end-to-end outbound proxy delay using embedded Xray core.
+     */
+    fun measureXrayOutboundDelay(configJson: String, url: String = "https://www.google.com/generate_204"): Long? {
+        return try {
+            val delay = libv2ray.Libv2ray.measureOutboundDelay(configJson, url)
+            if (delay >= 0) delay else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
 }

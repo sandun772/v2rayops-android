@@ -26,6 +26,28 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Deep Link: v2rayops://auth/callback?code=... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="v2rayops"
+                    android:host="auth"
+                    android:pathPrefix="/callback" />
+            </intent-filter>
+
+            <!-- Web App Link: https://v2rayops.vpnxhub.com/auth/mobile-callback -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="v2rayops.vpnxhub.com"
+                    android:pathPrefix="/auth/mobile-callback" />
+            </intent-filter>
         </activity>
 
         <!-- Android VpnService declaration for Xray Core tunnel -->

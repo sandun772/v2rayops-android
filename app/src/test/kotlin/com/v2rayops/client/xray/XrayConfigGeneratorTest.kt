@@ -56,5 +56,12 @@ class XrayConfigGeneratorTest {
         val routing = json.getJSONObject("routing")
         val rules = routing.getJSONArray("rules")
         assertTrue(rules.length() >= 2)
+
+        // Real-Time Stats & Policy validation (Phase 2)
+        assertTrue(json.has("stats"))
+        assertTrue(json.has("policy"))
+        val policySystem = json.getJSONObject("policy").getJSONObject("system")
+        assertTrue(policySystem.getBoolean("statsOutboundUplink"))
+        assertTrue(policySystem.getBoolean("statsOutboundDownlink"))
     }
 }

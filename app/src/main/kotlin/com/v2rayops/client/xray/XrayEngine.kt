@@ -15,9 +15,10 @@ sealed interface XrayState {
 interface XrayEngine {
     val state: StateFlow<XrayState>
     val isBinaryAvailable: Boolean
+    val version: String
 
     fun initialize(context: Context): Boolean
-    fun start(configJson: String): Result<Unit>
+    fun start(configJson: String, tunFd: Int = 0): Result<Unit>
     fun stop(): Result<Unit>
     fun queryTrafficStats(): TrafficStats
 }

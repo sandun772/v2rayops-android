@@ -24,13 +24,14 @@ class XrayEngineStub @Inject constructor() : XrayEngine {
     override val state: StateFlow<XrayState> = _state.asStateFlow()
 
     override val isBinaryAvailable: Boolean = false
+    override val version: String = "Xray-core Stub"
 
     override fun initialize(context: Context): Boolean {
         AppLogger.i("XrayEngineStub", "Initialized Xray Engine abstraction (binary compilation pending)")
         return true
     }
 
-    override fun start(configJson: String): Result<Unit> {
+    override fun start(configJson: String, tunFd: Int): Result<Unit> {
         AppLogger.w("XrayEngineStub", "Attempted to start Xray Engine before native binary was linked")
         _state.value = XrayState.BinaryPending("Xray Core binary integration scheduled for Phase 2")
         return Result.failure(

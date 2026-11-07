@@ -11,7 +11,7 @@ import javax.inject.Singleton
 
 interface VpnServiceController {
     fun prepareVpn(context: Context): Intent?
-    fun startService(server: ServerNode)
+    fun startService(server: ServerNode, configJson: String)
     fun stopService()
 }
 
@@ -24,10 +24,12 @@ class VpnServiceControllerImpl @Inject constructor(
         return VpnService.prepare(context)
     }
 
-    override fun startService(server: ServerNode) {
+    override fun startService(server: ServerNode, configJson: String) {
         val intent = Intent(context, V2RayOpsVpnService::class.java).apply {
             action = V2RayOpsVpnService.ACTION_START
             putExtra(V2RayOpsVpnService.EXTRA_SERVER_NAME, server.displayName)
+            putExtra(V2RayOpsVpnService.EXTRA_SERVER_ENDPOINT, server.displayEndpoint)
+            putExtra(V2RayOpsVpnService.EXTRA_CONFIG_JSON, configJson)
         }
         ContextCompat.startForegroundService(context, intent)
     }

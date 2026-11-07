@@ -1,5 +1,7 @@
 package com.v2rayops.client.auth.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -18,7 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +51,7 @@ import com.v2rayops.client.designsystem.theme.CyberBackground
 import com.v2rayops.client.designsystem.theme.CyberBorder
 import com.v2rayops.client.designsystem.theme.CyberCard
 import com.v2rayops.client.designsystem.theme.CyberPrimary
+import com.v2rayops.client.designsystem.theme.CyberSurface
 import com.v2rayops.client.designsystem.theme.CyberTextMuted
 import com.v2rayops.client.designsystem.theme.CyberTextPrimary
 import com.v2rayops.client.designsystem.theme.CyberTextSecondary
@@ -55,10 +59,20 @@ import com.v2rayops.client.designsystem.theme.CyberTextSecondary
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
+    deepLinkCode: String? = null,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var customerCode by remember { mutableStateOf("") }
+    var customerCode by remember { mutableStateOf(deepLinkCode ?: "") }
+    val context = LocalContext.current
+
+    // Auto-trigger login when deep link code is received
+    LaunchedEffect(deepLinkCode) {
+        if (!deepLinkCode.isNullOrBlank()) {
+            customerCode = deepLinkCode
+            viewModel.login(deepLinkCode)
+        }
+    }
 
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
@@ -81,7 +95,7 @@ fun LoginScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(60.dp))
+            Spacer(modifier = Modifier.height(48.dp))
 
             // Official Brand Logo
             Image(
@@ -106,7 +120,7 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Enter your unique V2RayOPS customer code or access token to synchronize node configurations.",
+                text = "Authorize this client via your customer code, or sign in through the web portal to link your device automatically.",
                 fontSize = 13.sp,
                 color = CyberTextSecondary,
                 lineHeight = 20.sp,
@@ -114,7 +128,7 @@ fun LoginScreen(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
             // Customer Code Input
             CyberTextField(
@@ -138,9 +152,9 @@ fun LoginScreen(
                 enabled = !isLoading
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // Action Button
+            // Action Button: Authorize with entered code
             CyberButton(
                 onClick = { viewModel.login(customerCode) },
                 isLoading = isLoading,
@@ -152,6 +166,64 @@ fun LoginScreen(
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Or Divider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(1.dp)
+                        .background(CyberBorder)
+                )
+                Text(
+                    text = "OR SIGN IN WITH ACCOUNT",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = CyberTextMuted,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(1.dp)
+                        .background(CyberBorder)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Web Sign In / Registration Button (opens website OAuth flow)
+            CyberButton(
+                onClick = {
+                    val webUrl = "https://v2rayops.vpnxhub.com/sign-in?from=/auth/mobile-callback"
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl))
+                    context.startActivity(intent)
+                },
+                variant = com.v2rayops.client.designsystem.components.CyberButtonVariant.OUTLINED,
+                enabled = !isLoading
+            ) {
+                Icon(
+                    imageVector = Icons.Default.OpenInBrowser,
+                    contentDescription = "Browser",
+                    modifier = Modifier.size(18.dp),
+                    tint = CyberAccent
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "SIGN IN VIA WEBSITE",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.5.sp,
+                    color = CyberTextPrimary
                 )
             }
 
@@ -172,7 +244,7 @@ fun LoginScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Your customer code is available in your account portal at v2rayops.vpnxhub.com. No administrative panel passwords are ever needed on this client.",
+                        text = "Your customer code is available in your account portal at v2rayops.vpnxhub.com. After logging in on the web, you'll be automatically redirected back into the app.",
                         fontSize = 12.sp,
                         color = CyberTextMuted,
                         lineHeight = 18.sp
