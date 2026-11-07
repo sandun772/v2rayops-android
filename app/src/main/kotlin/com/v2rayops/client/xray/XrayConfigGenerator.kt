@@ -182,15 +182,32 @@ class XrayConfigGenerator @Inject constructor(
                         val candidateDomains = linkedSetOf<String>()
                         val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
 
-                        if (parsed.wsHost.isNotBlank() && !isIp(parsed.wsHost)) {
-                            candidateDomains.add(parsed.wsHost)
+                        val addDomainWithWildcards: (String) -> Unit = { raw ->
+                            if (raw.isNotBlank() && !isIp(raw)) {
+                                candidateDomains.add(raw)
+                                val parts = raw.split(".")
+                                if (parts.size >= 2) {
+                                    val root = parts.takeLast(2).joinToString(".")
+                                    candidateDomains.add(root)
+                                    candidateDomains.add("*.$root")
+                                    if (parts.size >= 3) {
+                                        val parent = parts.drop(1).joinToString(".")
+                                        candidateDomains.add(parent)
+                                        candidateDomains.add("*.$parent")
+                                    }
+                                }
+                            }
                         }
-                        if (parsed.host.isNotBlank() && !isIp(parsed.host)) {
-                            candidateDomains.add(parsed.host)
-                        }
-                        if (sniHost.isNotBlank() && !isIp(sniHost)) {
-                            candidateDomains.add(sniHost)
-                        }
+
+                        addDomainWithWildcards(parsed.wsHost)
+                        addDomainWithWildcards(parsed.host)
+                        addDomainWithWildcards(sniHost)
+
+                        // Cluster origin & CDN fallback cert identities
+                        candidateDomains.add("sg-v2rayops.vpnxhub.com")
+                        candidateDomains.add("v2rayops.vpnxhub.com")
+                        candidateDomains.add("vpnxhub.com")
+                        candidateDomains.add("*.vpnxhub.com")
 
                         val tlsSettings = JSONObject().apply {
                             put("serverName", sniHost)
