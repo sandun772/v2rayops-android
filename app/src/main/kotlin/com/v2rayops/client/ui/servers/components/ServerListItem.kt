@@ -77,8 +77,16 @@ fun ServerListItem(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${config.displayEndpoint} • ${config.protocol.uppercase()}",
+                        text = "ADDR: ${config.effectiveAddr} • SNI: ${config.effectiveSni}",
                         fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (config.isAddrFronting) CyberAccent else CyberTextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${config.protocol.uppercase()} • ${if (config.isAddrFronting) "ADDR FRONTING" else "STANDARD SNI"}",
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         color = CyberTextMuted,
                         maxLines = 1,

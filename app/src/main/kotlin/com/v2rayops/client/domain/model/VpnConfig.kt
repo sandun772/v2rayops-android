@@ -26,4 +26,30 @@ data class VpnConfig(
 
     val displayEndpoint: String
         get() = if (host.isNotBlank()) "$host:$port" else "v2rayops.vpnxhub.com:443"
+
+    val isVpsHost: Boolean
+        get() = host.contains("vpnxhub.com", ignoreCase = true) || host == "172.236.134.215"
+
+    val activeSni: String
+        get() {
+            val regex = Regex("""[?&]sni=([^&#]*)""")
+            val match = regex.find(configUri)
+            val sniParam = match?.groupValues?.get(1)?.let {
+                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (_: Exception) { it }
+            } ?: ""
+            return if (sniParam.isNotBlank()) sniParam else host
+        }
+
+    val isAddrFronting: Boolean
+        get() = !isVpsHost && (configUri.contains("vpnxhub.com", ignoreCase = true) || configUri.contains("172.236.134.215"))
+
+    val effectiveAddr: String
+        get() = if (host.isNotBlank()) "$host:$port" else "sg-v2rayops.vpnxhub.com:443"
+
+    val effectiveSni: String
+        get() = if (isAddrFronting) {
+            host.ifBlank { activeSni }
+        } else {
+            activeSni
+        }
 }
