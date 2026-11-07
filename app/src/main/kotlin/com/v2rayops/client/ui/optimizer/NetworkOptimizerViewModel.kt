@@ -3,6 +3,10 @@ package com.v2rayops.client.ui.optimizer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2rayops.client.core.logger.AppLogger
+import com.v2rayops.client.network.BeastOptimizationReport
+import com.v2rayops.client.network.BeastOptimizerEngine
+import com.v2rayops.client.network.BeastProgressState
+import com.v2rayops.client.network.BeastTestProfile
 import com.v2rayops.client.network.DownloadBenchmarkProgress
 import com.v2rayops.client.network.DownloadBenchmarkResult
 import com.v2rayops.client.network.InAppBenchmarkReport
@@ -20,8 +24,11 @@ import javax.inject.Inject
 @HiltViewModel
 class NetworkOptimizerViewModel @Inject constructor(
     private val optimizerEngine: NetworkOptimizerEngine,
-    private val throughputEngine: ThroughputBenchmarkEngine
+    private val throughputEngine: ThroughputBenchmarkEngine,
+    private val beastOptimizerEngine: BeastOptimizerEngine
 ) : ViewModel() {
+
+    val beastProgressState: StateFlow<BeastProgressState> = beastOptimizerEngine.progressState
 
     private val _report = MutableStateFlow<NetworkOptimizationReport?>(null)
     val report: StateFlow<NetworkOptimizationReport?> = _report.asStateFlow()
@@ -157,6 +164,21 @@ class NetworkOptimizerViewModel @Inject constructor(
             } finally {
                 _isApplyingBenchmark.value = false
             }
+        }
+    }
+
+    // --- Beast Optimization Suite Triggers ---
+    fun startBeastOptimization(profile: BeastTestProfile) {
+        beastOptimizerEngine.startBeastOptimization(profile)
+    }
+
+    fun stopBeastOptimization() {
+        beastOptimizerEngine.stopOptimization()
+    }
+
+    fun applyCurrentBestBeast() {
+        viewModelScope.launch {
+            beastOptimizerEngine.applyCurrentBest()
         }
     }
 }

@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +32,7 @@ import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.PlayArrow
@@ -36,7 +40,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -76,6 +83,10 @@ import com.v2rayops.client.designsystem.theme.CyberTextMuted
 import com.v2rayops.client.designsystem.theme.CyberTextPrimary
 import com.v2rayops.client.designsystem.theme.CyberTextSecondary
 import com.v2rayops.client.designsystem.theme.CyberWarning
+import com.v2rayops.client.network.BeastOptimizationReport
+import com.v2rayops.client.network.BeastProgressState
+import com.v2rayops.client.network.BeastTestPhase
+import com.v2rayops.client.network.BeastTestProfile
 import com.v2rayops.client.network.DownloadBenchmarkProgress
 import com.v2rayops.client.network.DownloadBenchmarkResult
 import com.v2rayops.client.network.InAppBenchmarkReport
@@ -103,7 +114,9 @@ fun NetworkOptimizerScreen(
     val isApplyingBench by viewModel.isApplyingBenchmark.collectAsState()
     val benchApplySuccess by viewModel.benchmarkApplySuccess.collectAsState()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Network Audit, 1: Download & Streaming
+    val beastState by viewModel.beastProgressState.collectAsState()
+
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Carrier Audit, 1: Download & Stream, 2: Beast Auto-Tune
 
     Box(
         modifier = Modifier
@@ -121,37 +134,46 @@ fun NetworkOptimizerScreen(
                 actions = {
                     IconButton(
                         onClick = {
-                            if (selectedTab == 0) viewModel.runAnalysis()
-                            else viewModel.runFullThroughputTest()
+                            when (selectedTab) {
+                                0 -> viewModel.runAnalysis()
+                                1 -> viewModel.runFullThroughputTest()
+                                2 -> viewModel.startBeastOptimization(BeastTestProfile.EXHAUSTIVE_15M)
+                            }
                         },
-                        enabled = !isAnalyzing && !isTestingDl && !isTestingStream
+                        enabled = !isAnalyzing && !isTestingDl && !isTestingStream && !beastState.isRunning
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Re-analyze",
-                            tint = if (isAnalyzing || isTestingDl || isTestingStream) CyberTextMuted else CyberAccent
+                            tint = if (isAnalyzing || isTestingDl || isTestingStream || beastState.isRunning) CyberTextMuted else CyberAccent
                         )
                     }
                 }
             )
 
-            // Tab Selector: [ NETWORK AUDIT | SPEED & STREAMING ]
+            // 3-Way Tab Selector: [ CARRIER AUDIT | SPEED & STREAM | BEAST AUTO-TUNE ]
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 TabSelectorPill(
-                    label = "CARRIER AUDIT & PMTU",
+                    label = "CARRIER & PMTU",
                     isSelected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
                     modifier = Modifier.weight(1f)
                 )
                 TabSelectorPill(
-                    label = "DOWNLOAD & STREAMING",
+                    label = "SPEED & STREAM",
                     isSelected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
+                    modifier = Modifier.weight(1f)
+                )
+                TabSelectorPill(
+                    label = "BEAST AUTO-TUNE",
+                    isSelected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -161,211 +183,223 @@ fun NetworkOptimizerScreen(
                     .fillMaxSize()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                if (selectedTab == 0) {
-                    // TAB 0: CARRIER & PMTU AUDIT
-                    AnimatedVisibility(
-                        visible = isAnalyzing,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
-                        CyberCard(
-                            backgroundColor = CyberCardElevated,
-                            borderColor = CyberAccent,
-                            padding = 16.dp
+                when (selectedTab) {
+                    0 -> {
+                        // TAB 0: CARRIER & PMTU AUDIT
+                        AnimatedVisibility(
+                            visible = isAnalyzing,
+                            enter = fadeIn(),
+                            exit = fadeOut()
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                    color = CyberAccent
-                                )
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column {
-                                    Text(
-                                        text = "ANALYZING CLIENT NETWORK...",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
+                            CyberCard(
+                                backgroundColor = CyberCardElevated,
+                                borderColor = CyberAccent,
+                                padding = 16.dp
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
                                         color = CyberAccent
                                     )
-                                    Text(
-                                        text = "Testing PMTU, latency jitter, and DNS resolver race",
-                                        fontSize = 11.sp,
-                                        color = CyberTextMuted
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                    }
-
-                    if (report != null) {
-                        val rep = report!!
-
-                        HeroRatingCard(rep)
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        LatencyMetricsCard(rep)
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        DpiJitterInspectionCard(rep)
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        DnsRaceCard(rep)
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        RecommendedTuningCard(rep)
-                        Spacer(modifier = Modifier.height(20.dp))
-
-                        if (applySuccess || rep.isAlreadyOptimized) {
-                            CyberCard(
-                                backgroundColor = CyberCard,
-                                borderColor = CyberSuccess.copy(alpha = 0.6f),
-                                padding = 12.dp
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = "Applied",
-                                        tint = CyberSuccess,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "CONFIGURATION IS FULLY OPTIMIZED FOR THIS NETWORK",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = CyberSuccess
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(14.dp))
-                        }
-
-                        Button(
-                            onClick = { viewModel.applyOptimization() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = !isApplying && !isAnalyzing,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (rep.isAlreadyOptimized) CyberCardElevated else CyberPrimary
-                            )
-                        ) {
-                            if (isApplying) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(text = "APPLYING CONFIGURATION...", fontSize = 12.sp, color = Color.White)
-                            } else {
-                                Icon(
-                                    imageVector = if (rep.isAlreadyOptimized) Icons.Default.Check else Icons.Default.Tune,
-                                    contentDescription = "Apply",
-                                    tint = if (rep.isAlreadyOptimized) CyberSuccess else Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (rep.isAlreadyOptimized) "APPLIED & ACTIVE (CONFIGURED)" else "APPLY OPTIMAL CONFIGURATION",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = if (rep.isAlreadyOptimized) CyberSuccess else Color.White
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        CyberCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            padding = 14.dp,
-                            borderColor = CyberAccent,
-                            backgroundColor = CyberCardElevated,
-                            onClick = onNavigateToRouteFinder
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.AltRoute,
-                                        contentDescription = null,
-                                        tint = CyberAccent,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(14.dp))
                                     Column {
                                         Text(
-                                            text = "FIND FASTEST SNI & CARRIER ROUTE",
+                                            text = "ANALYZING CLIENT NETWORK...",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
-                                            color = CyberTextPrimary,
-                                            letterSpacing = 0.5.sp
+                                            color = CyberAccent
                                         )
                                         Text(
-                                            text = "Audit zero-rated bug hosts & TLS handshake latencies",
+                                            text = "Testing PMTU, latency jitter, and DNS resolver race",
                                             fontSize = 11.sp,
                                             color = CyberTextMuted
                                         )
                                     }
                                 }
                             }
+                            Spacer(modifier = Modifier.height(14.dp))
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        if (report != null) {
+                            val rep = report!!
 
-                        OutlinedButton(
-                            onClick = { viewModel.runAnalysis() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = !isAnalyzing,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberBorderSubtle)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Re-run",
-                                tint = CyberTextSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "RE-RUN NETWORK BENCHMARK",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = CyberTextSecondary
-                            )
+                            HeroRatingCard(rep)
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            LatencyMetricsCard(rep)
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            DpiJitterInspectionCard(rep)
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            DnsRaceCard(rep)
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            RecommendedTuningCard(rep)
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            if (applySuccess || rep.isAlreadyOptimized) {
+                                CyberCard(
+                                    backgroundColor = CyberCard,
+                                    borderColor = CyberSuccess.copy(alpha = 0.6f),
+                                    padding = 12.dp
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Applied",
+                                            tint = CyberSuccess,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "CONFIGURATION IS FULLY OPTIMIZED FOR THIS NETWORK",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = CyberSuccess
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(14.dp))
+                            }
+
+                            Button(
+                                onClick = { viewModel.applyOptimization() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = !isApplying && !isAnalyzing,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (rep.isAlreadyOptimized) CyberCardElevated else CyberPrimary
+                                )
+                            ) {
+                                if (isApplying) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = "APPLYING CONFIGURATION...", fontSize = 12.sp, color = Color.White)
+                                } else {
+                                    Icon(
+                                        imageVector = if (rep.isAlreadyOptimized) Icons.Default.Check else Icons.Default.Tune,
+                                        contentDescription = "Apply",
+                                        tint = if (rep.isAlreadyOptimized) CyberSuccess else Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (rep.isAlreadyOptimized) "APPLIED & ACTIVE (CONFIGURED)" else "APPLY OPTIMAL CONFIGURATION",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (rep.isAlreadyOptimized) CyberSuccess else Color.White
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            CyberCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                padding = 14.dp,
+                                borderColor = CyberAccent,
+                                backgroundColor = CyberCardElevated,
+                                onClick = onNavigateToRouteFinder
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.AltRoute,
+                                            contentDescription = null,
+                                            tint = CyberAccent,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = "FIND FASTEST SNI & CARRIER ROUTE",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = CyberTextPrimary,
+                                                letterSpacing = 0.5.sp
+                                            )
+                                            Text(
+                                                text = "Audit zero-rated bug hosts & TLS handshake latencies",
+                                                fontSize = 11.sp,
+                                                color = CyberTextMuted
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            OutlinedButton(
+                                onClick = { viewModel.runAnalysis() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = !isAnalyzing,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CyberBorderSubtle)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Re-run",
+                                    tint = CyberTextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "RE-RUN NETWORK BENCHMARK",
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberTextSecondary
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(30.dp))
                         }
-
-                        Spacer(modifier = Modifier.height(30.dp))
                     }
-                } else {
-                    // TAB 1: IN-APP DOWNLOAD & STREAMING BENCHMARK
-                    ThroughputBenchmarkSection(
-                        progress = dlProgress,
-                        downloadResult = dlResult,
-                        streamingResult = streamResult,
-                        isTestingDownload = isTestingDl,
-                        isTestingStreaming = isTestingStream,
-                        benchmarkReport = benchmarkReport,
-                        isApplying = isApplyingBench,
-                        applySuccess = benchApplySuccess,
-                        onRunDownload = { viewModel.runDownloadTest() },
-                        onRunStreaming = { viewModel.runStreamingTest() },
-                        onRunFullTest = { viewModel.runFullThroughputTest() },
-                        onApplyOptimizations = { viewModel.applyBenchmarkOptimization() }
-                    )
+                    1 -> {
+                        // TAB 1: IN-APP DOWNLOAD & STREAMING BENCHMARK
+                        ThroughputBenchmarkSection(
+                            progress = dlProgress,
+                            downloadResult = dlResult,
+                            streamingResult = streamResult,
+                            isTestingDownload = isTestingDl,
+                            isTestingStreaming = isTestingStream,
+                            benchmarkReport = benchmarkReport,
+                            isApplying = isApplyingBench,
+                            applySuccess = benchApplySuccess,
+                            onRunDownload = { viewModel.runDownloadTest() },
+                            onRunStreaming = { viewModel.runStreamingTest() },
+                            onRunFullTest = { viewModel.runFullThroughputTest() },
+                            onApplyOptimizations = { viewModel.applyBenchmarkOptimization() }
+                        )
+                    }
+                    2 -> {
+                        // TAB 2: ALL-IN-ONE BEAST NETWORK OPTIMIZATION SUITE
+                        BeastOptimizationSection(
+                            state = beastState,
+                            onStart = { profile -> viewModel.startBeastOptimization(profile) },
+                            onStop = { viewModel.stopBeastOptimization() },
+                            onApplyBest = { viewModel.applyCurrentBestBeast() }
+                        )
+                    }
                 }
             }
         }
@@ -394,11 +428,481 @@ private fun TabSelectorPill(
     ) {
         Text(
             text = label,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
             color = if (isSelected) Color.White else CyberTextSecondary
         )
+    }
+}
+
+@Composable
+private fun BeastOptimizationSection(
+    state: BeastProgressState,
+    onStart: (BeastTestProfile) -> Unit,
+    onStop: () -> Unit,
+    onApplyBest: () -> Unit
+) {
+    var selectedProfile by remember { mutableStateOf(BeastTestProfile.EXHAUSTIVE_15M) }
+
+    Column {
+        // Hero Notice Card
+        CyberCard(
+            modifier = Modifier.fillMaxWidth(),
+            padding = 16.dp,
+            borderColor = CyberAccent,
+            backgroundColor = CyberCardElevated
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Bolt,
+                        contentDescription = null,
+                        tint = CyberAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "ALL-IN-ONE BEAST AUTO-OPTIMIZATION",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "This is an exhaustive, deep network auto-tuning engine. Unlike an instant guess, it stress-tests bug hosts over sustained intervals (15m - 30m), measures carrier packet loss & jitter under continuous bursts, calibrates DPI packet fragmentation, and auto-applies the optimal V2Ray settings for maximum stability.",
+                    fontSize = 11.sp,
+                    color = CyberTextSecondary,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Profile Duration Selector Pills
+        if (!state.isRunning) {
+            Text(
+                text = "SELECT CALIBRATION DEPTH & DURATION:",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = CyberTextMuted
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                BeastTestProfile.values().forEach { prof ->
+                    val isSelected = selectedProfile == prof
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) CyberPrimary else CyberCard)
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) CyberAccent else CyberBorderSubtle,
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .clickable { selectedProfile = prof }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "${prof.durationMinutes} MINS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (isSelected) Color.White else CyberTextPrimary
+                            )
+                            Text(
+                                text = prof.displayName.uppercase(),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (isSelected) Color.White.copy(alpha = 0.8f) else CyberTextMuted
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // Live Execution Card
+        if (state.isRunning) {
+            val remMin = state.estimatedRemainingSeconds / 60
+            val remSec = state.estimatedRemainingSeconds % 60
+            val timeFormatted = String.format("%02d:%02d", remMin, remSec)
+
+            val elapMin = state.elapsedSeconds / 60
+            val elapSec = state.elapsedSeconds % 60
+            val elapsedFormatted = String.format("%02d:%02d", elapMin, elapSec)
+
+            CyberCard(
+                modifier = Modifier.fillMaxWidth(),
+                padding = 16.dp,
+                borderColor = CyberAccent,
+                backgroundColor = CyberCard
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "ESTIMATED REMAINING TIME",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextMuted
+                            )
+                            Text(
+                                text = timeFormatted,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberAccent
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "ELAPSED: $elapsedFormatted",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextSecondary
+                            )
+                            Text(
+                                text = "${(state.overallProgressPercent * 100).toInt()}% COMPLETED",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberSuccess
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    LinearProgressIndicator(
+                        progress = { state.overallProgressPercent },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = CyberAccent,
+                        trackColor = CyberBorder
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Phase Badge
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(CyberCardElevated)
+                            .border(1.dp, CyberAccent.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 2.dp,
+                                color = CyberAccent
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = state.currentPhase.title.uppercase(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Live stress metrics
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        MiniMetric(
+                            label = "PACKET LOSS",
+                            value = "${"%.1f".format(state.measuredLossPercent)}%",
+                            modifier = Modifier.weight(1f)
+                        )
+                        MiniMetric(
+                            label = "CARRIER JITTER",
+                            value = "±${state.measuredJitterMs}ms",
+                            modifier = Modifier.weight(1f)
+                        )
+                        MiniMetric(
+                            label = "WINNING ROUTE",
+                            value = state.winningRoute?.domain?.substringBefore(".") ?: "--",
+                            modifier = Modifier.weight(1f)
+                        )
+                        MiniMetric(
+                            label = "OPTIMAL MTU",
+                            value = "${state.winningMtu ?: 1380}B",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Live Console Terminal Output
+                    Text(
+                        text = "LIVE CALIBRATION STREAM:",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextMuted
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(CyberBackground)
+                            .border(1.dp, CyberBorderSubtle, RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Column {
+                            state.statusLog.takeLast(6).forEach { line ->
+                                Text(
+                                    text = "> $line",
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (line.contains("Winning", ignoreCase = true) || line.contains("SUCCESS", ignoreCase = true)) CyberSuccess else CyberTextSecondary,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Live Controls
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onApplyBest,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberAccent)
+                        ) {
+                            Text(
+                                text = "APPLY CURRENT BEST",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onStop,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberDanger)
+                        ) {
+                            Text(
+                                text = "ABORT TEST",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberDanger
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (state.beastReport != null) {
+            // Completed Beast Scorecard
+            val rep = state.beastReport
+            CyberCard(
+                modifier = Modifier.fillMaxWidth(),
+                padding = 16.dp,
+                borderColor = CyberSuccess,
+                backgroundColor = CyberCard
+            ) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = CyberSuccess,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "BEAST CALIBRATION ACTIVE & CONFIGURED",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberSuccess
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TuningRow(
+                            label = "Winning Route & Strategy",
+                            value = "[${rep.winningRoute.strategy.shortTag}] ${rep.winningRoute.domain}",
+                            detail = if (rep.winningRoute.strategy == com.v2rayops.client.network.RouteStrategy.ADDR_SNI) "Addr Fronting (Zero Timeout Isolation)" else "Direct SNI Mode"
+                        )
+                        HorizontalDivider(color = CyberBorderSubtle, thickness = 1.dp)
+
+                        TuningRow(
+                            label = "Calibrated Cellular MTU",
+                            value = "${rep.winningMtu} Bytes",
+                            detail = "Zero-fragmentation LTE boundary"
+                        )
+                        HorizontalDivider(color = CyberBorderSubtle, thickness = 1.dp)
+
+                        TuningRow(
+                            label = "Fastest DNS Resolver",
+                            value = "${rep.winningDns} (${rep.winningDnsProvider})",
+                            detail = "Lowest query RTT"
+                        )
+                        HorizontalDivider(color = CyberBorderSubtle, thickness = 1.dp)
+
+                        TuningRow(
+                            label = "DPI Evasion & Jitter Fix",
+                            value = "ACTIVE (100-200B / 10-20ms)",
+                            detail = "Middlebox TLS fragmentation & TCP NoDelay"
+                        )
+                        HorizontalDivider(color = CyberBorderSubtle, thickness = 1.dp)
+
+                        TuningRow(
+                            label = "Sustained Packet Loss Rate",
+                            value = "${"%.1f".format(rep.packetLossPercent)}%",
+                            detail = "Measured across continuous stress bursts"
+                        )
+                        HorizontalDivider(color = CyberBorderSubtle, thickness = 1.dp)
+
+                        TuningRow(
+                            label = "Sustained Carrier Jitter",
+                            value = "±${rep.avgSustainedJitterMs}ms",
+                            detail = "Stabilized with adaptive token-bucket queue"
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Button(
+                        onClick = { onStart(selectedProfile) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary)
+                    ) {
+                        Text(
+                            text = "RE-CALIBRATE BEAST OPTIMIZATION",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        } else {
+            // Idle State: Start Calibration Button
+            Button(
+                onClick = { onStart(selectedProfile) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Bolt,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "START ${selectedProfile.durationMinutes}-MINUTE BEAST CALIBRATION",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.White
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // What this suite tunes card
+            CyberCard(
+                modifier = Modifier.fillMaxWidth(),
+                padding = 14.dp,
+                backgroundColor = CyberCard
+            ) {
+                Column {
+                    Text(
+                        text = "WHAT THIS MULTI-PHASE TEST WILL CONFIGURE:",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val features = listOf(
+                        "Multi-round validation of all bug hosts (Standard SNI & Addr-Fronting)",
+                        "Carrier DPI middlebox packet fragmentation calibration (100-200B)",
+                        "Precise cellular PMTU boundary discovery (1360 - 1420 Bytes)",
+                        "Sustained packet loss & timing jitter stress testing across rounds",
+                        "TCP_NODELAY Nagle bypass to eliminate carrier delayed-ACKs",
+                        "TCP Sliding window buffer & anti-bufferbloat headroom calculation"
+                    )
+
+                    features.forEach { feat ->
+                        Row(modifier = Modifier.padding(vertical = 3.dp)) {
+                            Text(
+                                text = "• ",
+                                fontSize = 11.sp,
+                                color = CyberAccent,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = feat,
+                                fontSize = 11.sp,
+                                color = CyberTextSecondary,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(30.dp))
     }
 }
 
@@ -535,7 +1039,6 @@ private fun DownloadBenchmarkCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Gauge display
             val displaySpeed = if (isTesting) progress.currentSpeedMbps else result?.avgSpeedMbps ?: 0.0
             val peakSpeed = result?.peakSpeedMbps ?: progress.currentSpeedMbps
 
@@ -1067,6 +1570,104 @@ private fun MetricItem(
 }
 
 @Composable
+private fun DpiJitterInspectionCard(report: NetworkOptimizationReport) {
+    val dpiColor = if (report.isDpiDetected) CyberWarning else CyberSuccess
+
+    CyberCard(
+        backgroundColor = CyberCard,
+        borderColor = if (report.isDpiDetected) CyberWarning.copy(alpha = 0.5f) else CyberBorderSubtle,
+        padding = 16.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = "DPI Audit",
+                        tint = CyberAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "DPI DELAY & JITTER AUDIT",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(dpiColor.copy(alpha = 0.15f))
+                        .border(1.dp, dpiColor, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (report.isDpiDetected) "DPI ACTIVE" else "DPI BYPASSED",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = dpiColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = if (report.isDpiDetected) {
+                    "Carrier middlebox is intercepting initial TLS ClientHello packets, introducing +${report.dpiInspectionDelayMs}ms handshake stall. TLS packet fragmentation and TCP NoDelay bypass DPI inspection."
+                } else {
+                    "Minimal middlebox inspection delay observed (+${report.dpiInspectionDelayMs}ms). Packets pass with low carrier jitter."
+                },
+                fontSize = 11.sp,
+                color = CyberTextSecondary,
+                lineHeight = 16.sp
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricItem(
+                    label = "DPI STALL",
+                    value = "+${report.dpiInspectionDelayMs}ms",
+                    color = if (report.dpiInspectionDelayMs < 60) CyberSuccess else CyberWarning,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricItem(
+                    label = "JITTER",
+                    value = "±${report.jitterMs}ms",
+                    color = if (report.jitterMs < 40) CyberSuccess else CyberDanger,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricItem(
+                    label = "ANTI-DPI TLS",
+                    value = "100-200B",
+                    color = CyberAccent,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricItem(
+                    label = "TCP NODELAY",
+                    value = "ACTIVE",
+                    color = CyberSuccess,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun DnsRaceCard(report: NetworkOptimizationReport) {
     CyberCard(
         backgroundColor = CyberCard,
@@ -1222,104 +1823,6 @@ private fun RecommendedTuningCard(report: NetworkOptimizationReport) {
                     label = "TCP NoDelay (Nagle Bypass)",
                     value = "ENABLED",
                     detail = "Disables delayed-ACK buffering to eliminate carrier jitter"
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DpiJitterInspectionCard(report: NetworkOptimizationReport) {
-    val dpiColor = if (report.isDpiDetected) CyberWarning else CyberSuccess
-
-    CyberCard(
-        backgroundColor = CyberCard,
-        borderColor = if (report.isDpiDetected) CyberWarning.copy(alpha = 0.5f) else CyberBorderSubtle,
-        padding = 16.dp
-    ) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = "DPI Audit",
-                        tint = CyberAccent,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "DPI DELAY & JITTER AUDIT",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = CyberTextPrimary,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(dpiColor.copy(alpha = 0.15f))
-                        .border(1.dp, dpiColor, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = if (report.isDpiDetected) "DPI ACTIVE" else "DPI BYPASSED",
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = dpiColor
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = if (report.isDpiDetected) {
-                    "Carrier middlebox is intercepting initial TLS ClientHello packets, introducing +${report.dpiInspectionDelayMs}ms handshake stall. TLS packet fragmentation and TCP NoDelay bypass DPI inspection."
-                } else {
-                    "Minimal middlebox inspection delay observed (+${report.dpiInspectionDelayMs}ms). Packets pass with low carrier jitter."
-                },
-                fontSize = 11.sp,
-                color = CyberTextSecondary,
-                lineHeight = 16.sp
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MetricItem(
-                    label = "DPI STALL",
-                    value = "+${report.dpiInspectionDelayMs}ms",
-                    color = if (report.dpiInspectionDelayMs < 60) CyberSuccess else CyberWarning,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricItem(
-                    label = "JITTER",
-                    value = "±${report.jitterMs}ms",
-                    color = if (report.jitterMs < 40) CyberSuccess else CyberDanger,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricItem(
-                    label = "ANTI-DPI TLS",
-                    value = "100-200B",
-                    color = CyberAccent,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricItem(
-                    label = "TCP NODELAY",
-                    value = "ACTIVE",
-                    color = CyberSuccess,
-                    modifier = Modifier.weight(1f)
                 )
             }
         }
