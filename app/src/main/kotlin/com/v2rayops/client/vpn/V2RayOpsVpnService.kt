@@ -82,6 +82,13 @@ class V2RayOpsVpnService : VpnService() {
                 builder.setMetered(false)
             }
 
+            // Exclude V2RayOps app itself so Xray Core's outbound connections to the VPS do not loop into TUN
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (e: Exception) {
+                AppLogger.w("V2RayOpsVpnService", "Could not disallow package from VPN: ${e.message}")
+            }
+
             val pfd = builder.establish()
             if (pfd == null) {
                 AppLogger.e("V2RayOpsVpnService", "Failed to establish VPN interface: builder.establish() returned null")

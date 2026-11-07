@@ -1,5 +1,9 @@
 package com.v2rayops.client.ui.dashboard
 
+import android.app.Activity
+import android.net.VpnService
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +29,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,11 +57,20 @@ fun DashboardScreen(
     onNavigateToSettings: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val connectionState by viewModel.connectionState.collectAsState()
     val trafficStats by viewModel.trafficStats.collectAsState()
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+
+    val vpnPrepareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.onConnectToggle()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -122,7 +136,19 @@ fun DashboardScreen(
                 // Main Connection Button
                 ConnectionButton(
                     connectionState = connectionState,
-                    onClick = { viewModel.onConnectToggle() }
+                    onClick = {
+                        val state = connectionState
+                        if (state.isConnected || state.isConnecting) {
+                            viewModel.onConnectToggle()
+                        } else {
+                            val prepareIntent = VpnService.prepare(context)
+                            if (prepareIntent != null) {
+                                vpnPrepareLauncher.launch(prepareIntent)
+                            } else {
+                                viewModel.onConnectToggle()
+                            }
+                        }
+                    }
                 )
 
                 // Honest Architectural Banner if Engine is pending

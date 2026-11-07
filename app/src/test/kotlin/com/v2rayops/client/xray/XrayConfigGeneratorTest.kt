@@ -40,11 +40,13 @@ class XrayConfigGeneratorTest {
 
         val json = JSONObject(jsonString)
 
-        // Inbounds validation
+        // Inbounds validation (TUN + SOCKS + HTTP)
         val inbounds = json.getJSONArray("inbounds")
-        assertEquals(2, inbounds.length())
-        assertEquals(10808, inbounds.getJSONObject(0).getInt("port"))
-        assertEquals(10809, inbounds.getJSONObject(1).getInt("port"))
+        assertEquals(3, inbounds.length())
+        assertEquals("tun", inbounds.getJSONObject(0).getString("protocol"))
+        assertEquals("tun-in", inbounds.getJSONObject(0).getString("tag"))
+        assertEquals(10808, inbounds.getJSONObject(1).getInt("port"))
+        assertEquals(10809, inbounds.getJSONObject(2).getInt("port"))
 
         // Outbounds validation
         val outbounds = json.getJSONArray("outbounds")

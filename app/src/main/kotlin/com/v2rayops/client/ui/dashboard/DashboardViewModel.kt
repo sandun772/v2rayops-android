@@ -68,8 +68,14 @@ class DashboardViewModel @Inject constructor(
             vpnManager.disconnect()
         } else {
             viewModelScope.launch {
-                val config = selectedConfig.value
-                    ?: subscriptionRepository.observeConfigs().first().firstOrNull()
+                var config = selectedConfig.value
+                if (config == null) {
+                    val code = authRepository.getSavedCustomerCode()
+                    if (!code.isNullOrBlank()) {
+                        subscriptionRepository.syncConfigs(code)
+                    }
+                    config = selectedConfig.value ?: subscriptionRepository.observeConfigs().first().firstOrNull()
+                }
 
                 if (config != null) {
                     vpnManager.connect(config)

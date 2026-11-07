@@ -57,6 +57,10 @@ class XrayEngineImpl @Inject constructor(
                 filesDir.mkdirs()
             }
 
+            // Extract essential GeoIP and GeoSite routing databases from AAR assets
+            copyAssetIfNeeded(context, "geoip.dat", File(filesDir, "geoip.dat"))
+            copyAssetIfNeeded(context, "geosite.dat", File(filesDir, "geosite.dat"))
+
             Libv2ray.initCoreEnv(filesDir.absolutePath, "")
             isInitialized = true
             AppLogger.i(TAG, "Initialized Xray core environment at: ${filesDir.absolutePath}, version: $version")
@@ -64,6 +68,20 @@ class XrayEngineImpl @Inject constructor(
         } catch (t: Throwable) {
             AppLogger.e(TAG, "Failed to initialize Xray core environment", t)
             false
+        }
+    }
+
+    private fun copyAssetIfNeeded(context: Context, assetName: String, destFile: File) {
+        if (destFile.exists() && destFile.length() > 0) return
+        try {
+            context.assets.open(assetName).use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            AppLogger.d(TAG, "Extracted asset $assetName to ${destFile.absolutePath} (${destFile.length()} bytes)")
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "Asset $assetName not copied: ${e.message}")
         }
     }
 

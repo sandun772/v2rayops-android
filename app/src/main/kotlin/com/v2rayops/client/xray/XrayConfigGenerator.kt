@@ -35,8 +35,30 @@ class XrayConfigGenerator @Inject constructor(
         }
         root.put("dns", dns)
 
-        // 3. Inbounds (Local SOCKS & HTTP for TUN routing)
+        // 3. Inbounds (Native TUN + Local SOCKS & HTTP)
         val inbounds = JSONArray().apply {
+            // Layer 3 TUN inbound for native Android VpnService capture
+            put(JSONObject().apply {
+                put("tag", "tun-in")
+                put("protocol", "tun")
+                put("settings", JSONObject().apply {
+                    put("name", "tun0")
+                    put("mtu", 1500)
+                    put("stack", "system")
+                    put("autoRoute", false)
+                })
+                put("sniffing", JSONObject().apply {
+                    put("enabled", true)
+                    put("destOverride", JSONArray().apply {
+                        put("http")
+                        put("tls")
+                        put("quic")
+                    })
+                    put("routeOnly", true)
+                })
+            })
+
+            // Local SOCKS inbound
             put(JSONObject().apply {
                 put("tag", "socks-in")
                 put("port", 10808)
@@ -46,7 +68,17 @@ class XrayConfigGenerator @Inject constructor(
                     put("auth", "noauth")
                     put("udp", true)
                 })
+                put("sniffing", JSONObject().apply {
+                    put("enabled", true)
+                    put("destOverride", JSONArray().apply {
+                        put("http")
+                        put("tls")
+                        put("quic")
+                    })
+                })
             })
+
+            // Local HTTP inbound
             put(JSONObject().apply {
                 put("tag", "http-in")
                 put("port", 10809)
@@ -102,8 +134,13 @@ class XrayConfigGenerator @Inject constructor(
                         put("realitySettings", realitySettings)
                     } else if (parsed.security == "tls") {
                         val tlsSettings = JSONObject().apply {
-                            put("serverName", parsed.sni)
+                            put("serverName", parsed.sni.ifBlank { parsed.host })
                             put("fingerprint", "chrome")
+                            if (parsed.networkType.equals("ws", ignoreCase = true)) {
+                                put("alpn", JSONArray().apply {
+                                    put("http/1.1")
+                                })
+                            }
                         }
                         put("tlsSettings", tlsSettings)
                     }
@@ -165,6 +202,17 @@ class XrayConfigGenerator @Inject constructor(
                     })
                 })
             }
+
+            // Route all captured TUN and local proxy traffic to proxy outbound
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("inboundTag", JSONArray().apply {
+                    put("tun-in")
+                    put("socks-in")
+                    put("http-in")
+                })
+                put("outboundTag", "proxy")
+            })
 
             // Default proxy rule
             rules.put(JSONObject().apply {
