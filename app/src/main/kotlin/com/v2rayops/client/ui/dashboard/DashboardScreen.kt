@@ -54,7 +54,7 @@ fun DashboardScreen(
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
     val trafficStats by viewModel.trafficStats.collectAsState()
-    val selectedServer by viewModel.selectedServer.collectAsState()
+    val selectedConfig by viewModel.selectedConfig.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
 
@@ -154,9 +154,9 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(36.dp))
 
-                // Active Node Card
+                // Active Client Config Card
                 ActiveServerCard(
-                    server = selectedServer,
+                    config = selectedConfig,
                     onClick = onNavigateToServers
                 )
 

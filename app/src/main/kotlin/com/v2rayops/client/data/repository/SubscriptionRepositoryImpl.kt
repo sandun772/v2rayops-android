@@ -26,8 +26,16 @@ class SubscriptionRepositoryImpl @Inject constructor(
 ) : SubscriptionRepository {
 
     private val _configs = MutableStateFlow<List<VpnConfig>>(emptyList())
+    private val _selectedConfig = MutableStateFlow<VpnConfig?>(null)
 
     override fun observeConfigs(): Flow<List<VpnConfig>> = _configs.asStateFlow()
+
+    override fun observeSelectedConfig(): Flow<VpnConfig?> = _selectedConfig.asStateFlow()
+
+    override fun selectConfig(config: VpnConfig) {
+        _selectedConfig.value = config
+        AppLogger.i("SubscriptionRepository", "Selected active config: ${config.displayName}")
+    }
 
     override suspend fun syncConfigs(customerCode: String): AppResult<List<VpnConfig>> =
         withContext(dispatchers.io) {
@@ -36,20 +44,35 @@ class SubscriptionRepositoryImpl @Inject constructor(
                 if (response.isSuccessful && response.body() != null) {
                     val dtoList = response.body()!!.configs
                     val parsedConfigs = dtoList.map { dto ->
-                        val parsed = profileParser.parseUri(dto.configUri)
+                        val rawUri = (dto.configUri ?: dto.configData ?: "").trim()
+                        val parsed = profileParser.parseUri(rawUri)
+
                         VpnConfig(
                             id = dto.id,
-                            protocol = dto.protocol,
-                            configUri = dto.configUri,
+                            protocol = dto.protocol.ifBlank { "vless" },
+                            configUri = rawUri,
                             serverId = dto.serverId,
                             status = dto.status,
-                            remark = parsed?.remark ?: "${dto.protocol.uppercase()} Server",
+                            configName = dto.configName ?: "",
+                            remark = parsed?.remark ?: dto.configName ?: "${dto.protocol.uppercase()} Config #${dto.id}",
                             host = parsed?.host ?: "",
-                            port = parsed?.port ?: 443
+                            port = parsed?.port ?: 443,
+                            expiresAt = dto.expiresAt,
+                            serverName = dto.serverName ?: "",
+                            serverCountry = dto.serverCountry ?: "SG",
+                            serverFlag = dto.serverFlag ?: "🇸🇬"
                         )
                     }
 
                     _configs.value = parsedConfigs
+
+                    // Auto-select first active config if none currently selected or if stale
+                    val currentSelected = _selectedConfig.value
+                    if (currentSelected == null || parsedConfigs.none { it.id == currentSelected.id }) {
+                        _selectedConfig.value = parsedConfigs.firstOrNull()
+                    }
+
+                    AppLogger.i("SubscriptionRepository", "Synced ${parsedConfigs.size} active configs for customer $customerCode")
                     AppResult.Success(parsedConfigs)
                 } else {
                     AppResult.Failure(AppError.Server(response.code(), response.message()))

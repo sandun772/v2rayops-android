@@ -84,11 +84,13 @@ class XrayConfigGenerator @Inject constructor(
             }
             put("settings", settingsObj)
 
-            // StreamSettings (Reality / TLS)
-            if (parsed != null && (parsed.security == "reality" || parsed.security == "tls")) {
+            // StreamSettings (Reality / TLS / WebSocket)
+            if (parsed != null) {
                 val streamSettings = JSONObject().apply {
                     put("network", parsed.networkType.ifBlank { "tcp" })
-                    put("security", parsed.security)
+                    if (parsed.security.isNotBlank() && parsed.security != "none") {
+                        put("security", parsed.security)
+                    }
 
                     if (parsed.security == "reality") {
                         val realitySettings = JSONObject().apply {
@@ -101,8 +103,23 @@ class XrayConfigGenerator @Inject constructor(
                     } else if (parsed.security == "tls") {
                         val tlsSettings = JSONObject().apply {
                             put("serverName", parsed.sni)
+                            put("fingerprint", "chrome")
                         }
                         put("tlsSettings", tlsSettings)
+                    }
+
+                    // WebSocket transport settings (standard V2RayOPS 3X-UI transport)
+                    if (parsed.networkType.equals("ws", ignoreCase = true)) {
+                        val wsSettings = JSONObject().apply {
+                            put("path", parsed.wsPath.ifBlank { "/v2rayops" })
+                            if (parsed.wsHost.isNotBlank()) {
+                                val headers = JSONObject().apply {
+                                    put("Host", parsed.wsHost)
+                                }
+                                put("headers", headers)
+                            }
+                        }
+                        put("wsSettings", wsSettings)
                     }
                 }
                 put("streamSettings", streamSettings)

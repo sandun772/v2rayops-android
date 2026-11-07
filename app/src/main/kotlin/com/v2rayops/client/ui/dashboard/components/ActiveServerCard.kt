@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2rayops.client.designsystem.components.CyberCard
@@ -27,11 +28,11 @@ import com.v2rayops.client.designsystem.theme.CyberBorder
 import com.v2rayops.client.designsystem.theme.CyberCard
 import com.v2rayops.client.designsystem.theme.CyberTextMuted
 import com.v2rayops.client.designsystem.theme.CyberTextPrimary
-import com.v2rayops.client.domain.model.ServerNode
+import com.v2rayops.client.domain.model.VpnConfig
 
 @Composable
 fun ActiveServerCard(
-    server: ServerNode?,
+    config: VpnConfig?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -47,10 +48,13 @@ fun ActiveServerCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Icon(
-                    imageVector = Icons.Default.Dns,
-                    contentDescription = "Server",
+                    imageVector = Icons.Default.VpnKey,
+                    contentDescription = "Active Config",
                     tint = CyberAccent,
                     modifier = Modifier.size(24.dp)
                 )
@@ -59,26 +63,33 @@ fun ActiveServerCard(
 
                 Column {
                     Text(
-                        text = server?.displayName ?: "No Server Selected",
-                        fontSize = 15.sp,
+                        text = config?.displayName ?: "No Config Selected",
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = CyberTextPrimary
+                        color = CyberTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = server?.displayEndpoint ?: "Tap to select node",
-                        fontSize = 12.sp,
+                        text = if (config != null) {
+                            "${config.displayEndpoint} • ${config.protocol.uppercase()}"
+                        } else {
+                            "Tap to select active package configuration"
+                        },
+                        fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = CyberTextMuted
+                        color = CyberTextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val latency = server?.latencyMs
-                if (latency != null) {
+                if (config != null) {
                     StatusBadge(
-                        text = "${latency}ms",
-                        status = if (latency < 150) StatusIndicatorType.CONNECTED else StatusIndicatorType.WARNING
+                        text = config.serverCountry.ifBlank { "ACTIVE" },
+                        status = StatusIndicatorType.CONNECTED
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                 }

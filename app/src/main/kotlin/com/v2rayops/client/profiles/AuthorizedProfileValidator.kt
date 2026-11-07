@@ -19,10 +19,13 @@ class AuthorizedProfileValidator @Inject constructor(
 
         val parsed = profileParser.parseUri(config.configUri) ?: return false
 
-        // Check if config matches at least one authorized V2RayOPS server by ID or hostname
-        val matchesServer = authorizedServers.any { server ->
+        // Check if config matches at least one authorized V2RayOPS server by ID, hostname, or V2RayOps domain
+        val matchesServer = authorizedServers.isEmpty() || authorizedServers.any { server ->
             server.id == config.serverId ||
-            server.hostname.equals(parsed.host, ignoreCase = true)
+            server.hostname.equals(parsed.host, ignoreCase = true) ||
+            server.hostname.equals(parsed.wsHost, ignoreCase = true) ||
+            parsed.host.endsWith("vpnxhub.com") ||
+            parsed.wsHost.endsWith("vpnxhub.com")
         }
 
         return matchesServer

@@ -18,6 +18,8 @@ data class ParsedProfile(
     val sni: String = "",
     val flow: String = "",
     val networkType: String = "tcp",
+    val wsPath: String = "",
+    val wsHost: String = "",
     val publicKey: String = "",
     val shortId: String = "",
     val rawUri: String
@@ -47,13 +49,15 @@ class ProfileParser @Inject constructor() {
         val userInfo = uri.userInfo ?: ""
         val host = uri.host ?: ""
         val port = if (uri.port > 0) uri.port else 443
-        val remark = uri.fragment?.let { URLDecoder.decode(it, "UTF-8") } ?: "VLESS Server"
+        val remark = uri.fragment?.let { safeDecode(it) } ?: "VLESS Config"
 
         val queryParams = parseQuery(uri.rawQuery)
         val security = queryParams["security"] ?: "none"
         val sni = queryParams["sni"] ?: ""
         val flow = queryParams["flow"] ?: ""
         val type = queryParams["type"] ?: "tcp"
+        val path = queryParams["path"]?.let { safeDecode(it) } ?: ""
+        val wsHost = queryParams["host"]?.let { safeDecode(it) } ?: host
         val pbk = queryParams["pbk"] ?: ""
         val sid = queryParams["sid"] ?: ""
 
@@ -67,6 +71,8 @@ class ProfileParser @Inject constructor() {
             sni = sni,
             flow = flow,
             networkType = type,
+            wsPath = path,
+            wsHost = wsHost,
             publicKey = pbk,
             shortId = sid,
             rawUri = rawUri
@@ -78,12 +84,14 @@ class ProfileParser @Inject constructor() {
         val password = uri.userInfo ?: ""
         val host = uri.host ?: ""
         val port = if (uri.port > 0) uri.port else 443
-        val remark = uri.fragment?.let { URLDecoder.decode(it, "UTF-8") } ?: "Trojan Server"
+        val remark = uri.fragment?.let { safeDecode(it) } ?: "Trojan Config"
 
         val queryParams = parseQuery(uri.rawQuery)
         val security = queryParams["security"] ?: "tls"
         val sni = queryParams["sni"] ?: ""
         val type = queryParams["type"] ?: "tcp"
+        val path = queryParams["path"]?.let { safeDecode(it) } ?: ""
+        val wsHost = queryParams["host"]?.let { safeDecode(it) } ?: host
 
         return ParsedProfile(
             protocol = "trojan",
@@ -94,37 +102,40 @@ class ProfileParser @Inject constructor() {
             security = security,
             sni = sni,
             networkType = type,
+            wsPath = path,
+            wsHost = wsHost,
             rawUri = rawUri
         )
     }
 
     private fun parseVmess(rawUri: String): ParsedProfile? {
         val base64Content = rawUri.removePrefix("vmess://").trim()
-        val decodedBytes = try {
-            Base64.getDecoder().decode(base64Content)
-        } catch (_: Exception) {
-            Base64.getUrlDecoder().decode(base64Content)
-        }
-        val decodedJson = String(decodedBytes, Charsets.UTF_8)
-        val json = JSONObject(decodedJson)
+        val jsonStr = String(Base64.getUrlDecoder().decode(base64Content), Charsets.UTF_8)
+        val json = JSONObject(jsonStr)
 
-        val host = json.optString("add", "")
+        val host = json.optString("add")
         val port = json.optInt("port", 443)
-        val id = json.optString("id", "")
-        val remark = json.optString("ps", "VMess Server")
+        val uuid = json.optString("id")
+        val remark = json.optString("ps", "VMess Config")
+        val security = json.optString("tls", "none")
+        val sni = json.optString("sni")
         val net = json.optString("net", "tcp")
-        val tls = json.optString("tls", "none")
-        val sni = json.optString("sni", "")
+        val path = json.optString("path", "")
+        val wsHost = json.optString("host", host)
+
+        if (host.isBlank() || uuid.isBlank()) return null
 
         return ParsedProfile(
             protocol = "vmess",
             host = host,
             port = port,
-            uuidOrPassword = id,
+            uuidOrPassword = uuid,
             remark = remark,
-            security = tls,
+            security = if (security == "tls") "tls" else "none",
             sni = sni,
             networkType = net,
+            wsPath = path,
+            wsHost = wsHost,
             rawUri = rawUri
         )
     }
@@ -133,8 +144,10 @@ class ProfileParser @Inject constructor() {
         val uri = URI(rawUri)
         val host = uri.host ?: ""
         val port = if (uri.port > 0) uri.port else 8388
-        val remark = uri.fragment?.let { URLDecoder.decode(it, "UTF-8") } ?: "Shadowsocks Server"
+        val remark = uri.fragment?.let { safeDecode(it) } ?: "Shadowsocks Config"
         val userInfo = uri.userInfo ?: ""
+
+        if (host.isBlank() || userInfo.isBlank()) return null
 
         return ParsedProfile(
             protocol = "shadowsocks",
@@ -148,13 +161,23 @@ class ProfileParser @Inject constructor() {
 
     private fun parseQuery(query: String?): Map<String, String> {
         if (query.isNullOrBlank()) return emptyMap()
-        return query.split("&").mapNotNull { param ->
-            val parts = param.split("=", limit = 2)
-            if (parts.isNotEmpty()) {
-                val key = URLDecoder.decode(parts[0], "UTF-8")
-                val value = if (parts.size > 1) URLDecoder.decode(parts[1], "UTF-8") else ""
-                key to value
-            } else null
-        }.toMap()
+        return query.split("&")
+            .mapNotNull {
+                val idx = it.indexOf('=')
+                if (idx > 0) {
+                    val key = it.substring(0, idx)
+                    val value = it.substring(idx + 1)
+                    key to value
+                } else null
+            }
+            .toMap()
+    }
+
+    private fun safeDecode(text: String): String {
+        return try {
+            URLDecoder.decode(text, "UTF-8")
+        } catch (_: Exception) {
+            text
+        }
     }
 }

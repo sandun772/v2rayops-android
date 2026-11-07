@@ -43,7 +43,7 @@ class VpnManager @Inject constructor(
     private val _trafficStats = MutableStateFlow(TrafficStats())
     val trafficStats: StateFlow<TrafficStats> = _trafficStats.asStateFlow()
 
-    private var currentServer: ServerNode? = null
+    private var currentConfig: VpnConfig? = null
     private var statsJob: Job? = null
 
     init {
@@ -52,19 +52,19 @@ class VpnManager @Inject constructor(
             xrayEngine.state.collect { xrayState ->
                 when (xrayState) {
                     is XrayState.Running -> {
-                        val srv = currentServer
+                        val cfg = currentConfig
                         val now = xrayState.startedAtMs
                         _connectionState.value = ConnectionState.Connected(
-                            serverName = srv?.displayName ?: "V2RayOps Node",
-                            serverEndpoint = srv?.displayEndpoint ?: "v2rayops.vpnxhub.com",
+                            serverName = cfg?.displayName ?: "V2RayOps Client Config",
+                            serverEndpoint = cfg?.displayEndpoint ?: "sg-v2rayops.vpnxhub.com:443",
                             connectedSinceMs = now
                         )
                         startTrafficPolling()
                     }
                     is XrayState.Starting -> {
-                        val srv = currentServer
+                        val cfg = currentConfig
                         _connectionState.value = ConnectionState.Connecting(
-                            serverName = srv?.displayName ?: "V2RayOps Node"
+                            serverName = cfg?.displayName ?: "V2RayOps Client Config"
                         )
                     }
                     is XrayState.Stopped -> {
@@ -86,23 +86,27 @@ class VpnManager @Inject constructor(
         }
     }
 
-    fun connect(server: ServerNode, config: VpnConfig) {
+    fun connect(config: VpnConfig) {
         scope.launch {
-            currentServer = server
-            _connectionState.value = ConnectionState.Connecting(server.displayName)
+            currentConfig = config
+            _connectionState.value = ConnectionState.Connecting(config.displayName)
 
             try {
                 val settings = settingsRepository.observeSettings().first()
                 val configJson = configGenerator.generateJson(config, settings)
 
-                AppLogger.i(TAG, "Requesting VPN Service start with node: ${server.displayName}")
-                vpnController.startService(server, configJson)
+                AppLogger.i(TAG, "Requesting VPN Service start with config: ${config.displayName}")
+                vpnController.startService(config.displayName, config.displayEndpoint, configJson)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Failed to initiate VPN connection", e)
                 _connectionState.value = ConnectionState.Error(e.message ?: "Failed to generate tunnel configuration")
                 vpnController.stopService()
             }
         }
+    }
+
+    fun connect(server: ServerNode, config: VpnConfig) {
+        connect(config)
     }
 
     fun disconnect() {
@@ -114,7 +118,7 @@ class VpnManager @Inject constructor(
             xrayEngine.stop()
             _connectionState.value = ConnectionState.Disconnected
             _trafficStats.value = TrafficStats()
-            currentServer = null
+            currentConfig = null
         }
     }
 

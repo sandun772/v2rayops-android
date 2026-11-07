@@ -4,11 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2rayops.client.core.result.AppResult
 import com.v2rayops.client.domain.model.ConnectionState
-import com.v2rayops.client.domain.model.ServerNode
 import com.v2rayops.client.domain.model.TrafficStats
 import com.v2rayops.client.domain.model.UserProfile
+import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.domain.repository.AuthRepository
-import com.v2rayops.client.domain.repository.ServerRepository
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,7 +23,6 @@ import javax.inject.Inject
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val authRepository: AuthRepository,
-    private val serverRepository: ServerRepository,
     private val subscriptionRepository: SubscriptionRepository,
     private val vpnManager: VpnManager
 ) : ViewModel() {
@@ -32,8 +30,11 @@ class DashboardViewModel @Inject constructor(
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
     val trafficStats: StateFlow<TrafficStats> = vpnManager.trafficStats
 
-    val selectedServer: StateFlow<ServerNode?> = serverRepository.observeSelectedServer()
+    val selectedConfig: StateFlow<VpnConfig?> = subscriptionRepository.observeSelectedConfig()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val configs: StateFlow<List<VpnConfig>> = subscriptionRepository.observeConfigs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _userProfile = MutableStateFlow<UserProfile?>(null)
     val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
@@ -53,8 +54,6 @@ class DashboardViewModel @Inject constructor(
                 else -> Unit
             }
 
-            serverRepository.refreshServers()
-
             val code = authRepository.getSavedCustomerCode()
             if (!code.isNullOrBlank()) {
                 subscriptionRepository.syncConfigs(code)
@@ -69,14 +68,11 @@ class DashboardViewModel @Inject constructor(
             vpnManager.disconnect()
         } else {
             viewModelScope.launch {
-                val server = selectedServer.value
-                    ?: serverRepository.observeServers().first().firstOrNull()
+                val config = selectedConfig.value
+                    ?: subscriptionRepository.observeConfigs().first().firstOrNull()
 
-                val configs = subscriptionRepository.observeConfigs().first()
-                val matchedConfig = configs.find { it.serverId == server?.id } ?: configs.firstOrNull()
-
-                if (server != null && matchedConfig != null) {
-                    vpnManager.connect(server, matchedConfig)
+                if (config != null) {
+                    vpnManager.connect(config)
                 }
             }
         }

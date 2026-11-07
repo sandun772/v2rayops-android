@@ -2,8 +2,9 @@ package com.v2rayops.client.ui.servers
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.v2rayops.client.domain.model.ServerNode
-import com.v2rayops.client.domain.repository.ServerRepository
+import com.v2rayops.client.domain.model.VpnConfig
+import com.v2rayops.client.domain.repository.AuthRepository
+import com.v2rayops.client.domain.repository.SubscriptionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -15,28 +16,34 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ServerSelectionViewModel @Inject constructor(
-    private val serverRepository: ServerRepository
+    private val subscriptionRepository: SubscriptionRepository,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
-    val servers: StateFlow<List<ServerNode>> = serverRepository.observeServers()
+    val configs: StateFlow<List<VpnConfig>> = subscriptionRepository.observeConfigs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val selectedServer: StateFlow<ServerNode?> = serverRepository.observeSelectedServer()
+    val selectedConfig: StateFlow<VpnConfig?> = subscriptionRepository.observeSelectedConfig()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-    fun selectServer(server: ServerNode) {
-        viewModelScope.launch {
-            serverRepository.selectServer(server.id)
-        }
+    init {
+        refreshConfigs()
     }
 
-    fun refreshServers() {
+    fun selectConfig(config: VpnConfig) {
+        subscriptionRepository.selectConfig(config)
+    }
+
+    fun refreshConfigs() {
         viewModelScope.launch {
             _isRefreshing.value = true
-            serverRepository.refreshServers()
+            val code = authRepository.getSavedCustomerCode()
+            if (!code.isNullOrBlank()) {
+                subscriptionRepository.syncConfigs(code)
+            }
             _isRefreshing.value = false
         }
     }

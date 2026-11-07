@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -38,8 +39,8 @@ fun ServerSelectionScreen(
     onBackClick: () -> Unit,
     viewModel: ServerSelectionViewModel = hiltViewModel()
 ) {
-    val servers by viewModel.servers.collectAsState()
-    val selectedServer by viewModel.selectedServer.collectAsState()
+    val configs by viewModel.configs.collectAsState()
+    val selectedConfig by viewModel.selectedConfig.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
 
     Box(
@@ -49,11 +50,11 @@ fun ServerSelectionScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             CyberTopAppBar(
-                title = "EDGE SERVERS",
+                title = "ACTIVE CONFIGURATIONS",
                 onBackClick = onBackClick,
                 actions = {
                     IconButton(
-                        onClick = { viewModel.refreshServers() },
+                        onClick = { viewModel.refreshConfigs() },
                         enabled = !isRefreshing
                     ) {
                         if (isRefreshing) {
@@ -73,14 +74,14 @@ fun ServerSelectionScreen(
                 }
             )
 
-            if (servers.isEmpty() && isRefreshing) {
+            if (configs.isEmpty() && isRefreshing) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(color = CyberAccent)
                 }
-            } else if (servers.isEmpty()) {
+            } else if (configs.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -89,7 +90,7 @@ fun ServerSelectionScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "NO SERVERS AVAILABLE",
+                            text = "NO ACTIVE CONFIGS FOUND",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -97,9 +98,11 @@ fun ServerSelectionScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Check your connection and tap refresh to fetch nodes.",
+                            text = "Your customer account does not have active package configurations provisioned yet. Log in or purchase a package on v2rayops.vpnxhub.com to sync your configurations.",
                             fontSize = 12.sp,
-                            color = CyberTextMuted
+                            color = CyberTextMuted,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
                         )
                     }
                 }
@@ -107,35 +110,19 @@ fun ServerSelectionScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 20.dp)
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
                 ) {
-                    item {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "SELECT OPERATIONAL NODE (${servers.size})",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 1.sp,
-                            color = CyberTextMuted
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    items(servers, key = { it.id }) { server ->
+                    items(configs, key = { it.id }) { config ->
+                        val isSelected = config.id == selectedConfig?.id
                         ServerListItem(
-                            server = server,
-                            isSelected = server.id == selectedServer?.id,
+                            config = config,
+                            isSelected = isSelected,
                             onSelect = {
-                                viewModel.selectServer(server)
+                                viewModel.selectConfig(config)
                                 onBackClick()
                             },
                             modifier = Modifier.padding(vertical = 6.dp)
                         )
-                    }
-
-                    item {
-                        Spacer(modifier = Modifier.height(30.dp))
                     }
                 }
             }

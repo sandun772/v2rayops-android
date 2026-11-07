@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2rayops.client.designsystem.components.CyberCard
@@ -27,11 +28,11 @@ import com.v2rayops.client.designsystem.theme.CyberBorder
 import com.v2rayops.client.designsystem.theme.CyberCard
 import com.v2rayops.client.designsystem.theme.CyberTextMuted
 import com.v2rayops.client.designsystem.theme.CyberTextPrimary
-import com.v2rayops.client.domain.model.ServerNode
+import com.v2rayops.client.domain.model.VpnConfig
 
 @Composable
 fun ServerListItem(
-    server: ServerNode,
+    config: VpnConfig,
     isSelected: Boolean,
     onSelect: () -> Unit,
     modifier: Modifier = Modifier
@@ -49,10 +50,13 @@ fun ServerListItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Icon(
-                    imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.Dns,
-                    contentDescription = "Server Node",
+                    imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.VpnKey,
+                    contentDescription = "Config",
                     tint = if (isSelected) CyberAccent else CyberTextMuted,
                     modifier = Modifier.size(24.dp)
                 )
@@ -61,32 +65,38 @@ fun ServerListItem(
 
                 Column {
                     Text(
-                        text = server.displayName,
-                        fontSize = 15.sp,
+                        text = config.displayName,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = CyberTextPrimary
+                        color = CyberTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = server.displayEndpoint,
-                        fontSize = 12.sp,
+                        text = "${config.displayEndpoint} • ${config.protocol.uppercase()}",
+                        fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = CyberTextMuted
+                        color = CyberTextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    if (!config.expiresAt.isNullOrBlank()) {
+                        Text(
+                            text = "Expires: ${config.expiresAt.take(10)}",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberAccent.copy(alpha = 0.8f)
+                        )
+                    }
                 }
             }
 
-            val latency = server.latencyMs
-            if (latency != null) {
-                StatusBadge(
-                    text = "${latency}ms",
-                    status = if (latency < 150) StatusIndicatorType.CONNECTED else StatusIndicatorType.WARNING
-                )
-            } else {
-                StatusBadge(
-                    text = "STANDBY",
-                    status = StatusIndicatorType.DISCONNECTED
-                )
-            }
+            Spacer(modifier = Modifier.width(8.dp))
+
+            StatusBadge(
+                text = if (isSelected) "SELECTED" else config.serverCountry.ifBlank { "ACTIVE" },
+                status = if (isSelected) StatusIndicatorType.CONNECTED else StatusIndicatorType.DISCONNECTED
+            )
         }
     }
 }

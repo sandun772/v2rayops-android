@@ -64,4 +64,25 @@ class XrayConfigGeneratorTest {
         assertTrue(policySystem.getBoolean("statsOutboundUplink"))
         assertTrue(policySystem.getBoolean("statsOutboundDownlink"))
     }
+
+    @Test
+    fun generateJson_withWebSocketVless_generatesWsSettings() {
+        val wsConfig = VpnConfig(
+            id = 141,
+            protocol = "vless",
+            configUri = "vless://8ad10bfa-00e3-49cb-b025-fa09b4053160@sg-v2rayops.vpnxhub.com:443?alpn=http%2F1.1%2Ch2%2Ch3&encryption=none&fp=chrome&host=sg-v2rayops.vpnxhub.com&path=%2Fv2rayops&security=tls&sni=tiktok.com&type=ws#TiktokPass",
+            serverId = 11,
+            status = "active",
+            configName = "Dialog-Tiktok-Pass"
+        )
+        val settings = UserSettings()
+        val json = JSONObject(generator.generateJson(wsConfig, settings))
+        val proxy = json.getJSONArray("outbounds").getJSONObject(0)
+        val stream = proxy.getJSONObject("streamSettings")
+        assertEquals("ws", stream.getString("network"))
+        assertEquals("tls", stream.getString("security"))
+        val wsSettings = stream.getJSONObject("wsSettings")
+        assertEquals("/v2rayops", wsSettings.getString("path"))
+        assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
+    }
 }
