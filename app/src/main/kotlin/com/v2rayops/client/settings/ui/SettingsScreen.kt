@@ -68,6 +68,7 @@ fun SettingsScreen(
     onLogoutSuccess: () -> Unit,
     onNavigateToLogs: () -> Unit,
     onNavigateToOptimizer: () -> Unit,
+    onNavigateToRouteFinder: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
@@ -306,6 +307,51 @@ fun SettingsScreen(
                         }
                         Text(
                             text = "TUNE →",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = CyberAccent
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Best SNI & Fastest Route Finder Entry Point
+                CyberCard(
+                    padding = 16.dp,
+                    borderColor = CyberAccent.copy(alpha = 0.7f),
+                    onClick = onNavigateToRouteFinder
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AltRoute,
+                                contentDescription = "Route Finder",
+                                tint = CyberAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "SNI & Fastest Route Finder",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = CyberTextPrimary
+                                )
+                                Text(
+                                    text = "Benchmark zero-rated bug hosts & TLS handshake routes",
+                                    fontSize = 12.sp,
+                                    color = CyberTextMuted
+                                )
+                            }
+                        }
+                        Text(
+                            text = "SCAN →",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,

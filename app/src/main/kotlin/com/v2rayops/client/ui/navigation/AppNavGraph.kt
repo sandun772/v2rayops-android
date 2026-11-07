@@ -10,6 +10,7 @@ import com.v2rayops.client.settings.ui.SettingsScreen
 import com.v2rayops.client.ui.dashboard.DashboardScreen
 import com.v2rayops.client.ui.logs.DevLogsScreen
 import com.v2rayops.client.ui.optimizer.NetworkOptimizerScreen
+import com.v2rayops.client.ui.routefinder.RouteFinderScreen
 import com.v2rayops.client.ui.servers.ServerSelectionScreen
 import com.v2rayops.client.ui.splash.SplashScreen
 
@@ -70,6 +71,9 @@ fun AppNavGraph(
                 },
                 onNavigateToOptimizer = {
                     navController.navigate(Screen.Optimizer.route)
+                },
+                onNavigateToRouteFinder = {
+                    navController.navigate(Screen.RouteFinder.route)
                 }
             )
         }
@@ -93,6 +97,9 @@ fun AppNavGraph(
                 onNavigateToOptimizer = {
                     navController.navigate(Screen.Optimizer.route)
                 },
+                onNavigateToRouteFinder = {
+                    navController.navigate(Screen.RouteFinder.route)
+                },
                 onLogoutSuccess = {
                     navController.navigate(Screen.Login.route) {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
@@ -111,6 +118,17 @@ fun AppNavGraph(
 
         composable(Screen.Optimizer.route) {
             NetworkOptimizerScreen(
+                onBackClick = {
+                    navController.popBackStack()
+                },
+                onNavigateToRouteFinder = {
+                    navController.navigate(Screen.RouteFinder.route)
+                }
+            )
+        }
+
+        composable(Screen.RouteFinder.route) {
+            RouteFinderScreen(
                 onBackClick = {
                     navController.popBackStack()
                 }

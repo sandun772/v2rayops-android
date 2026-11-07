@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AltRoute
 import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -70,6 +71,7 @@ import com.v2rayops.client.network.NetworkOptimizationReport
 @Composable
 fun NetworkOptimizerScreen(
     onBackClick: () -> Unit,
+    onNavigateToRouteFinder: () -> Unit = {},
     viewModel: NetworkOptimizerViewModel = hiltViewModel()
 ) {
     val report by viewModel.report.collectAsState()
@@ -234,7 +236,49 @@ fun NetworkOptimizerScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // SNI & Fastest Route Finder Link Card
+                    CyberCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        padding = 14.dp,
+                        borderColor = CyberAccent,
+                        backgroundColor = CyberCardElevated,
+                        onClick = onNavigateToRouteFinder
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.AltRoute,
+                                    contentDescription = null,
+                                    tint = CyberAccent,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "FIND FASTEST SNI & CARRIER ROUTE",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = CyberTextPrimary,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                    Text(
+                                        text = "Audit zero-rated bug hosts & TLS handshake latencies",
+                                        fontSize = 11.sp,
+                                        color = CyberTextMuted
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     OutlinedButton(
                         onClick = { viewModel.runAnalysis() },

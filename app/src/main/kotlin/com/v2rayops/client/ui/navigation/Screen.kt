@@ -8,4 +8,5 @@ sealed class Screen(val route: String) {
     data object Settings : Screen("settings")
     data object Logs : Screen("logs")
     data object Optimizer : Screen("optimizer")
+    data object RouteFinder : Screen("route_finder")
 }
