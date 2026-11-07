@@ -1,0 +1,23 @@
+package com.v2rayops.client.xray
+
+import android.content.Context
+import com.v2rayops.client.domain.model.TrafficStats
+import kotlinx.coroutines.flow.StateFlow
+
+sealed interface XrayState {
+    data object Stopped : XrayState
+    data object Starting : XrayState
+    data class Running(val startedAtMs: Long) : XrayState
+    data class Error(val error: String) : XrayState
+    data class BinaryPending(val message: String) : XrayState
+}
+
+interface XrayEngine {
+    val state: StateFlow<XrayState>
+    val isBinaryAvailable: Boolean
+
+    fun initialize(context: Context): Boolean
+    fun start(configJson: String): Result<Unit>
+    fun stop(): Result<Unit>
+    fun queryTrafficStats(): TrafficStats
+}

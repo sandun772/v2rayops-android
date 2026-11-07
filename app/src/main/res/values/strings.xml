@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">V2RayOPS</string>
+    <string name="vpn_service_name">V2RayOPS Secure Tunnel</string>
+    <string name="vpn_channel_id">v2rayops_vpn_channel</string>
+    <string name="vpn_channel_name">VPN Connection State</string>
+    <string name="vpn_channel_description">Displays ongoing VPN connection status and traffic stats</string>
+</resources>
