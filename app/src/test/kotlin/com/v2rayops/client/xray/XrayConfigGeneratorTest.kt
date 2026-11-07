@@ -63,12 +63,18 @@ class XrayConfigGeneratorTest {
         assertEquals("53", dnsRule.getString("port"))
         assertEquals("dns-out", dnsRule.getString("outboundTag"))
 
-        // Real-Time Stats & Policy validation (Phase 2)
+        // Real-Time Stats & Policy validation (Phase 2 & Smart QoS)
         assertTrue(json.has("stats"))
         assertTrue(json.has("policy"))
-        val policySystem = json.getJSONObject("policy").getJSONObject("system")
+        val policy = json.getJSONObject("policy")
+        val policySystem = policy.getJSONObject("system")
         assertTrue(policySystem.getBoolean("statsOutboundUplink"))
         assertTrue(policySystem.getBoolean("statsOutboundDownlink"))
+        val policyLevels = policy.getJSONObject("levels")
+        assertTrue(policyLevels.has("0"))
+        assertTrue(policyLevels.has("8"))
+        assertEquals(32, policyLevels.getJSONObject("8").getInt("bufferSize"))
+        assertEquals(16, policyLevels.getJSONObject("0").getInt("bufferSize"))
     }
 
     @Test

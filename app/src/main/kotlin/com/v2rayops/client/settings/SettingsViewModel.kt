@@ -46,6 +46,24 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun toggleSmartQoS(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setSmartQoSEnabled(enabled)
+        }
+    }
+
+    fun setDownloadSpeedLimit(limitMbps: Int) {
+        viewModelScope.launch {
+            settingsRepository.setDownloadSpeedLimitMbps(limitMbps)
+        }
+    }
+
+    fun toggleCellularMtuOptimized(optimized: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setCellularMtuOptimized(optimized)
+        }
+    }
+
     fun logout(onSuccess: () -> Unit) {
         viewModelScope.launch {
             authRepository.logout()

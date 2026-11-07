@@ -14,5 +14,8 @@ data class UserSettings(
     val customDns: String = "1.1.1.1",
     val perAppProxyEnabled: Boolean = false,
     val selectedServerId: Long? = null,
-    val preferredProtocol: String = "vless"
+    val preferredProtocol: String = "vless",
+    val smartQoSEnabled: Boolean = true,
+    val downloadSpeedLimitMbps: Int = 0,
+    val cellularMtuOptimized: Boolean = true
 )

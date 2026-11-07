@@ -45,6 +45,7 @@ class XrayConfigGenerator @Inject constructor(
         root.put("dns", dns)
 
         // 3. Inbounds (Native TUN + Local SOCKS & HTTP)
+        val effectiveMtu = if (settings.cellularMtuOptimized) 1380 else 1500
         val inbounds = JSONArray().apply {
             // Layer 3 TUN inbound for native Android VpnService capture
             put(JSONObject().apply {
@@ -53,7 +54,7 @@ class XrayConfigGenerator @Inject constructor(
                 put("protocol", "tun")
                 put("settings", JSONObject().apply {
                     put("name", "xray0")
-                    put("mtu", 1500)
+                    put("mtu", effectiveMtu)
                     put("userLevel", 8)
                 })
                 put("sniffing", JSONObject().apply {
@@ -326,15 +327,29 @@ class XrayConfigGenerator @Inject constructor(
         }
         root.put("routing", routing)
 
-        // 6. Real-Time Outbound Traffic Statistics & System Policy
+        // 6. Real-Time Outbound Traffic Statistics & Adaptive QoS Policy
         root.put("stats", JSONObject())
         val policy = JSONObject().apply {
             val levels = JSONObject().apply {
+                // Level 0: Interactive & Low-Latency Tier
+                val level0 = JSONObject().apply {
+                    put("handshake", 4)
+                    put("connIdle", 300)
+                    put("uplinkOnly", 1)
+                    put("downlinkOnly", 1)
+                    put("bufferSize", 16)
+                }
+                put("0", level0)
+
+                // Level 8: Standard / Smart QoS Tier
                 val level8 = JSONObject().apply {
                     put("handshake", 4)
                     put("connIdle", 300)
                     put("uplinkOnly", 1)
                     put("downlinkOnly", 1)
+                    // Smart QoS: Restrict buffer size to 32KB to apply TCP sliding window backpressure and mitigate bufferbloat
+                    val bufKb = if (settings.smartQoSEnabled) 32 else 64
+                    put("bufferSize", bufKb)
                 }
                 put("8", level8)
             }

@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -31,6 +32,9 @@ class UserPreferencesDataStore @Inject constructor(
         val PER_APP_PROXY = booleanPreferencesKey("per_app_proxy_enabled")
         val SELECTED_SERVER_ID = longPreferencesKey("selected_server_id")
         val PREFERRED_PROTOCOL = stringPreferencesKey("preferred_protocol")
+        val SMART_QOS = booleanPreferencesKey("smart_qos_enabled")
+        val SPEED_LIMIT_MBPS = intPreferencesKey("download_speed_limit_mbps")
+        val CELLULAR_MTU = booleanPreferencesKey("cellular_mtu_optimized")
     }
 
     val userSettingsFlow: Flow<UserSettings> = context.dataStore.data.map { preferences ->
@@ -49,7 +53,10 @@ class UserPreferencesDataStore @Inject constructor(
             customDns = preferences[PreferencesKeys.CUSTOM_DNS] ?: "1.1.1.1",
             perAppProxyEnabled = preferences[PreferencesKeys.PER_APP_PROXY] ?: false,
             selectedServerId = preferences[PreferencesKeys.SELECTED_SERVER_ID],
-            preferredProtocol = preferences[PreferencesKeys.PREFERRED_PROTOCOL] ?: "vless"
+            preferredProtocol = preferences[PreferencesKeys.PREFERRED_PROTOCOL] ?: "vless",
+            smartQoSEnabled = preferences[PreferencesKeys.SMART_QOS] ?: true,
+            downloadSpeedLimitMbps = preferences[PreferencesKeys.SPEED_LIMIT_MBPS] ?: 0,
+            cellularMtuOptimized = preferences[PreferencesKeys.CELLULAR_MTU] ?: true
         )
     }
 
@@ -79,5 +86,17 @@ class UserPreferencesDataStore @Inject constructor(
 
     suspend fun setPreferredProtocol(protocol: String) {
         context.dataStore.edit { it[PreferencesKeys.PREFERRED_PROTOCOL] = protocol }
+    }
+
+    suspend fun setSmartQoSEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.SMART_QOS] = enabled }
+    }
+
+    suspend fun setDownloadSpeedLimitMbps(limitMbps: Int) {
+        context.dataStore.edit { it[PreferencesKeys.SPEED_LIMIT_MBPS] = limitMbps }
+    }
+
+    suspend fun setCellularMtuOptimized(optimized: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.CELLULAR_MTU] = optimized }
     }
 }

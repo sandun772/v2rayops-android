@@ -13,4 +13,7 @@ interface SettingsRepository {
     suspend fun setCustomDns(dns: String)
     suspend fun setSelectedServerId(serverId: Long)
     suspend fun setPreferredProtocol(protocol: String)
+    suspend fun setSmartQoSEnabled(enabled: Boolean)
+    suspend fun setDownloadSpeedLimitMbps(limitMbps: Int)
+    suspend fun setCellularMtuOptimized(optimized: Boolean)
 }

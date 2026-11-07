@@ -10,6 +10,8 @@ import com.v2rayops.client.domain.repository.SettingsRepository
 import com.v2rayops.client.xray.XrayConfigGenerator
 import com.v2rayops.client.xray.XrayEngine
 import com.v2rayops.client.xray.XrayState
+import com.v2rayops.client.network.AdaptiveQoSEngine
+import com.v2rayops.client.network.QoSStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +31,7 @@ class VpnManager @Inject constructor(
     private val vpnController: VpnServiceController,
     private val configGenerator: XrayConfigGenerator,
     private val settingsRepository: SettingsRepository,
+    private val adaptiveQoSEngine: AdaptiveQoSEngine,
     private val dispatchers: AppDispatchers
 ) {
     companion object {
@@ -42,6 +45,8 @@ class VpnManager @Inject constructor(
 
     private val _trafficStats = MutableStateFlow(TrafficStats())
     val trafficStats: StateFlow<TrafficStats> = _trafficStats.asStateFlow()
+
+    val qosStatus: StateFlow<QoSStatus> = adaptiveQoSEngine.qosStatus
 
     private var currentConfig: VpnConfig? = null
     private var statsJob: Job? = null
@@ -100,9 +105,10 @@ class VpnManager @Inject constructor(
             try {
                 val settings = settingsRepository.observeSettings().first()
                 val configJson = configGenerator.generateJson(config, settings)
+                val effectiveMtu = if (settings.cellularMtuOptimized) 1380 else 1500
 
-                AppLogger.i(TAG, "Requesting VPN Service start with config: ${config.displayName}")
-                vpnController.startService(config.displayName, config.displayEndpoint, configJson)
+                AppLogger.i(TAG, "Requesting VPN Service start with config: ${config.displayName} (MTU: $effectiveMtu, SmartQoS: ${settings.smartQoSEnabled})")
+                vpnController.startService(config.displayName, config.displayEndpoint, configJson, effectiveMtu)
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Failed to initiate VPN connection", e)
                 _connectionState.value = ConnectionState.Error(e.message ?: "Failed to generate tunnel configuration")
@@ -124,6 +130,7 @@ class VpnManager @Inject constructor(
             _connectionState.value = ConnectionState.Disconnecting
             isConnectInProgress = false
             stopTrafficPolling()
+            adaptiveQoSEngine.reset()
             vpnController.stopService()
             xrayEngine.stop()
             _connectionState.value = ConnectionState.Disconnected
@@ -139,6 +146,7 @@ class VpnManager @Inject constructor(
                 try {
                     val stats = xrayEngine.queryTrafficStats()
                     _trafficStats.value = stats
+                    adaptiveQoSEngine.processTrafficSample(stats)
                 } catch (t: Throwable) {
                     AppLogger.w(TAG, "Error polling traffic stats: ${t.message}")
                 }
@@ -150,5 +158,6 @@ class VpnManager @Inject constructor(
     private fun stopTrafficPolling() {
         statsJob?.cancel()
         statsJob = null
+        adaptiveQoSEngine.reset()
     }
 }

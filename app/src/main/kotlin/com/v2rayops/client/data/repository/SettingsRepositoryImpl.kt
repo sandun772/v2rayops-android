@@ -42,4 +42,16 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun setPreferredProtocol(protocol: String) {
         preferencesDataStore.setPreferredProtocol(protocol)
     }
+
+    override suspend fun setSmartQoSEnabled(enabled: Boolean) {
+        preferencesDataStore.setSmartQoSEnabled(enabled)
+    }
+
+    override suspend fun setDownloadSpeedLimitMbps(limitMbps: Int) {
+        preferencesDataStore.setDownloadSpeedLimitMbps(limitMbps)
+    }
+
+    override suspend fun setCellularMtuOptimized(optimized: Boolean) {
+        preferencesDataStore.setCellularMtuOptimized(optimized)
+    }
 }

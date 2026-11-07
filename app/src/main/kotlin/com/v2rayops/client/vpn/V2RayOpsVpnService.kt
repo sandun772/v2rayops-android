@@ -26,6 +26,7 @@ class V2RayOpsVpnService : VpnService() {
         const val EXTRA_SERVER_NAME = "extra_server_name"
         const val EXTRA_SERVER_ENDPOINT = "extra_server_endpoint"
         const val EXTRA_CONFIG_JSON = "extra_config_json"
+        const val EXTRA_MTU = "extra_mtu"
 
         private const val NOTIFICATION_ID = 7788
         private const val CHANNEL_ID = "v2rayops_vpn_channel"
@@ -50,7 +51,8 @@ class V2RayOpsVpnService : VpnService() {
                 val serverName = intent.getStringExtra(EXTRA_SERVER_NAME) ?: "V2RayOps Server"
                 val serverEndpoint = intent.getStringExtra(EXTRA_SERVER_ENDPOINT) ?: ""
                 val configJson = intent.getStringExtra(EXTRA_CONFIG_JSON) ?: ""
-                startVpnTunnel(serverName, serverEndpoint, configJson)
+                val mtu = intent.getIntExtra(EXTRA_MTU, 1380)
+                startVpnTunnel(serverName, serverEndpoint, configJson, mtu)
             }
             ACTION_STOP -> {
                 stopVpnTunnel()
@@ -62,7 +64,7 @@ class V2RayOpsVpnService : VpnService() {
 
     private val connectionLock = Any()
 
-    private fun startVpnTunnel(serverName: String, serverEndpoint: String, configJson: String) {
+    private fun startVpnTunnel(serverName: String, serverEndpoint: String, configJson: String, mtu: Int = 1380) {
         synchronized(connectionLock) {
             // Clean up previous interface and engine safely
             try {
@@ -87,12 +89,12 @@ class V2RayOpsVpnService : VpnService() {
             startForeground(NOTIFICATION_ID, initialNotification)
             isServiceRunning = true
 
-            AppLogger.i("V2RayOpsVpnService", "Establishing TUN interface for node: $serverName ($serverEndpoint)")
+            AppLogger.i("V2RayOpsVpnService", "Establishing TUN interface for node: $serverName ($serverEndpoint) [MTU: $mtu]")
 
             try {
                 val builder = Builder()
                     .setSession("V2RayOPS - $serverName")
-                    .setMtu(1500)
+                    .setMtu(mtu)
                     .addAddress("172.19.0.1", 30)
                     .addRoute("0.0.0.0", 0)
                     .addDnsServer("1.1.1.1")

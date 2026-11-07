@@ -1,6 +1,8 @@
 package com.v2rayops.client.settings.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,15 +15,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AltRoute
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.NetworkWifi
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -139,6 +145,93 @@ fun SettingsScreen(
                         checked = settings.autoConnectOnCellular,
                         onCheckedChange = { viewModel.toggleAutoConnectCellular(it) }
                     )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                SectionHeader(title = "SMART TRAFFIC & ADAPTIVE QOS")
+
+                CyberCard(padding = 16.dp) {
+                    SettingToggleItem(
+                        icon = Icons.Default.Speed,
+                        title = "Smart QoS (Anti-Bufferbloat)",
+                        description = "Smooths heavy background downloads to protect foreground apps and eliminate connection timeouts",
+                        checked = settings.smartQoSEnabled,
+                        onCheckedChange = { viewModel.toggleSmartQoS(it) }
+                    )
+
+                    HorizontalDivider(
+                        color = CyberBorder,
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    SettingToggleItem(
+                        icon = Icons.Default.NetworkCheck,
+                        title = "Cellular MTU Optimization (1380)",
+                        description = "Prevents LTE mobile network packet fragmentation and retransmission lag",
+                        checked = settings.cellularMtuOptimized,
+                        onCheckedChange = { viewModel.toggleCellularMtuOptimized(it) }
+                    )
+
+                    HorizontalDivider(
+                        color = CyberBorder,
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    // Download Speed Headroom Selector
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Download Bandwidth Headroom",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = CyberTextPrimary
+                            )
+                            Text(
+                                text = "Leaves dedicated headroom for responsive browsing and messaging",
+                                fontSize = 12.sp,
+                                color = CyberTextMuted
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val options = listOf(0 to "AUTO", 5 to "5 MBPS", 10 to "10 MBPS", 20 to "20 MBPS")
+                        options.forEach { (mbps, label) ->
+                            val isSelected = settings.downloadSpeedLimitMbps == mbps
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) CyberPrimary else CyberCard)
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) CyberAccent else CyberBorder,
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .clickable { viewModel.setDownloadSpeedLimit(mbps) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (isSelected) Color.White else CyberTextSecondary
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
