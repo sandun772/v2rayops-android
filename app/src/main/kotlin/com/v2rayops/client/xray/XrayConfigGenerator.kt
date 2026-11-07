@@ -32,6 +32,7 @@ class XrayConfigGenerator @Inject constructor(
                 put("8.8.8.8")
             }
             put("servers", servers)
+            put("queryStrategy", "UseIPv4")
         }
         root.put("dns", dns)
 
@@ -40,12 +41,11 @@ class XrayConfigGenerator @Inject constructor(
             // Layer 3 TUN inbound for native Android VpnService capture
             put(JSONObject().apply {
                 put("tag", "tun-in")
+                put("port", 0)
                 put("protocol", "tun")
                 put("settings", JSONObject().apply {
                     put("name", "tun0")
                     put("mtu", 1500)
-                    put("stack", "system")
-                    put("autoRoute", false)
                 })
                 put("sniffing", JSONObject().apply {
                     put("enabled", true)
@@ -54,7 +54,6 @@ class XrayConfigGenerator @Inject constructor(
                         put("tls")
                         put("quic")
                     })
-                    put("routeOnly", true)
                 })
             })
 
@@ -135,6 +134,7 @@ class XrayConfigGenerator @Inject constructor(
                     } else if (parsed.security == "tls") {
                         val tlsSettings = JSONObject().apply {
                             put("serverName", parsed.sni.ifBlank { parsed.host })
+                            put("allowInsecure", true)
                             put("fingerprint", "chrome")
                             if (parsed.networkType.equals("ws", ignoreCase = true)) {
                                 put("alpn", JSONArray().apply {
@@ -149,12 +149,11 @@ class XrayConfigGenerator @Inject constructor(
                     if (parsed.networkType.equals("ws", ignoreCase = true)) {
                         val wsSettings = JSONObject().apply {
                             put("path", parsed.wsPath.ifBlank { "/v2rayops" })
-                            if (parsed.wsHost.isNotBlank()) {
-                                val headers = JSONObject().apply {
-                                    put("Host", parsed.wsHost)
-                                }
-                                put("headers", headers)
+                            val hostHeader = parsed.wsHost.ifBlank { parsed.host }
+                            val headers = JSONObject().apply {
+                                put("Host", hostHeader)
                             }
+                            put("headers", headers)
                         }
                         put("wsSettings", wsSettings)
                     }
@@ -176,12 +175,29 @@ class XrayConfigGenerator @Inject constructor(
             put("protocol", "blackhole")
         })
 
+        // DNS Outbound
+        outbounds.put(JSONObject().apply {
+            put("tag", "dns-out")
+            put("protocol", "dns")
+        })
+
         root.put("outbounds", outbounds)
 
         // 5. Routing
         val routing = JSONObject().apply {
             put("domainStrategy", "IPIfNonMatch")
             val rules = JSONArray()
+
+            // DNS Interception: route UDP/TCP port 53 to Xray DNS engine
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("inboundTag", JSONArray().apply {
+                    put("tun-in")
+                })
+                put("port", 53)
+                put("network", "tcp,udp")
+                put("outboundTag", "dns-out")
+            })
 
             // Bypass Private LAN
             rules.put(JSONObject().apply {

@@ -78,7 +78,9 @@ class XrayConfigGeneratorTest {
             configName = "Dialog-Tiktok-Pass"
         )
         val settings = UserSettings()
-        val json = JSONObject(generator.generateJson(wsConfig, settings))
+        val jsonString = generator.generateJson(wsConfig, settings)
+        println("GENERATED_WS_JSON:\n" + jsonString)
+        val json = JSONObject(jsonString)
         val proxy = json.getJSONArray("outbounds").getJSONObject(0)
         val stream = proxy.getJSONObject("streamSettings")
         assertEquals("ws", stream.getString("network"))
@@ -86,5 +88,8 @@ class XrayConfigGeneratorTest {
         val wsSettings = stream.getJSONObject("wsSettings")
         assertEquals("/v2rayops", wsSettings.getString("path"))
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
+        val tlsSettings = stream.getJSONObject("tlsSettings")
+        assertTrue(tlsSettings.getBoolean("allowInsecure"))
+        assertEquals("tiktok.com", tlsSettings.getString("serverName"))
     }
 }
