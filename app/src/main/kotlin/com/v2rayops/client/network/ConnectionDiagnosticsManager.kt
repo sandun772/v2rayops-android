@@ -5,6 +5,7 @@ import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.vpn.VpnManager
 import com.v2rayops.client.xray.XrayEngine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -54,20 +55,22 @@ class ConnectionDiagnosticsManager @Inject constructor(
 
         AppLogger.i(TAG, "Starting connection diagnostics (isVpnConnected=$isVpnConnected)")
 
-        // 1. Measure Ping / Delay
+        // 1. Measure Ping / Delay with 2.5s safety timeout so it never blocks UI
         var pingMs = -1L
         if (isVpnConnected) {
-            val measured = xrayEngine.measureDelay("https://cp.cloudflare.com/generate_204")
+            val measured = withTimeoutOrNull(2500L) {
+                xrayEngine.measureDelay("https://cp.cloudflare.com/generate_204")
+            } ?: -1L
             if (measured > 0) {
                 pingMs = measured
             }
         }
 
-        // 2. Build OkHttpClient (proxied through local core if connected, direct if disconnected)
+        // 2. Build OkHttpClient (proxied through local core HTTP inbound if connected, direct if disconnected)
         val clientBuilder = OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
-            .writeTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
+            .writeTimeout(4, TimeUnit.SECONDS)
 
         if (isVpnConnected) {
             clientBuilder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", LOCAL_PROXY_PORT)))
@@ -82,42 +85,66 @@ class ConnectionDiagnosticsManager @Inject constructor(
             var countryCode = ""
             var isp = ""
 
-            // Attempt 1: https://ipwho.is
+            // Attempt 1: http://ip-api.com/json (fast HTTP endpoint, ideal for proxy testing)
             try {
                 val req1 = Request.Builder()
-                    .url("https://ipwho.is")
+                    .url("http://ip-api.com/json")
                     .header("User-Agent", "V2RayOps-Client/1.0")
                     .build()
                 val res1 = client.newCall(req1).execute()
                 if (res1.isSuccessful) {
                     val body1 = res1.body?.string() ?: ""
                     val json1 = JSONObject(body1)
-                    if (json1.optBoolean("success", true)) {
-                        ip = json1.optString("ip", "")
+                    if (json1.optString("status") == "success" || json1.has("query")) {
+                        ip = json1.optString("query", "")
                         country = json1.optString("country", "")
-                        countryCode = json1.optString("country_code", "")
-                        val conn = json1.optJSONObject("connection")
-                        isp = conn?.optString("isp", conn.optString("org", "")) ?: ""
+                        countryCode = json1.optString("countryCode", "")
+                        isp = json1.optString("isp", json1.optString("org", ""))
                     }
                 }
             } catch (t: Throwable) {
-                AppLogger.d(TAG, "ipwho.is check failed: ${t.message}, trying fallback")
+                AppLogger.d(TAG, "ip-api.com check failed: ${t.message}, trying fallback")
             }
 
-            // Attempt 2 (Fallback): http://ip-api.com/json
+            // Attempt 2 (Fallback): https://ipwho.is
             if (ip.isBlank()) {
-                val req2 = Request.Builder()
-                    .url("http://ip-api.com/json")
-                    .header("User-Agent", "V2RayOps-Client/1.0")
-                    .build()
-                val res2 = client.newCall(req2).execute()
-                if (res2.isSuccessful) {
-                    val body2 = res2.body?.string() ?: ""
-                    val json2 = JSONObject(body2)
-                    ip = json2.optString("query", "Unknown")
-                    country = json2.optString("country", "Unknown")
-                    countryCode = json2.optString("countryCode", "")
-                    isp = json2.optString("isp", json2.optString("org", "Unknown"))
+                try {
+                    val req2 = Request.Builder()
+                        .url("https://ipwho.is")
+                        .header("User-Agent", "V2RayOps-Client/1.0")
+                        .build()
+                    val res2 = client.newCall(req2).execute()
+                    if (res2.isSuccessful) {
+                        val body2 = res2.body?.string() ?: ""
+                        val json2 = JSONObject(body2)
+                        if (json2.optBoolean("success", true)) {
+                            ip = json2.optString("ip", "")
+                            country = json2.optString("country", "")
+                            countryCode = json2.optString("country_code", "")
+                            val conn = json2.optJSONObject("connection")
+                            isp = conn?.optString("isp", conn.optString("org", "")) ?: ""
+                        }
+                    }
+                } catch (t: Throwable) {
+                    AppLogger.d(TAG, "ipwho.is fallback check failed: ${t.message}")
+                }
+            }
+
+            // Attempt 3 (Minimal IP fallback): https://api.ipify.org?format=json
+            if (ip.isBlank()) {
+                try {
+                    val req3 = Request.Builder()
+                        .url("https://api.ipify.org?format=json")
+                        .header("User-Agent", "V2RayOps-Client/1.0")
+                        .build()
+                    val res3 = client.newCall(req3).execute()
+                    if (res3.isSuccessful) {
+                        val body3 = res3.body?.string() ?: ""
+                        val json3 = JSONObject(body3)
+                        ip = json3.optString("ip", "")
+                    }
+                } catch (t: Throwable) {
+                    AppLogger.d(TAG, "api.ipify.org fallback check failed: ${t.message}")
                 }
             }
 

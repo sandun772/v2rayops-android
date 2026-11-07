@@ -84,7 +84,7 @@ class AuthRepositoryImpl @Inject constructor(
                 AppResult.Failure(AppError.Server(response.code(), response.message()))
             }
         } catch (e: Exception) {
-            AppLogger.e("AuthRepository", "Failed to fetch profile", e)
+            AppLogger.d("AuthRepository", "Failed to fetch remote profile (${e.message}), continuing with cached credentials")
             AppResult.Failure(AppError.Network("Failed to refresh profile", e))
         }
     }

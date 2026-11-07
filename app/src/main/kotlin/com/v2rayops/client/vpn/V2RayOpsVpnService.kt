@@ -60,98 +60,118 @@ class V2RayOpsVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
+    private val connectionLock = Any()
+
     private fun startVpnTunnel(serverName: String, serverEndpoint: String, configJson: String) {
-        if (isServiceRunning) {
-            AppLogger.i("V2RayOpsVpnService", "Service is already running, restarting tunnel with new configuration")
-            stopVpnTunnel()
-        }
-
-        val initialNotification = buildNotification("Connecting to $serverName...")
-        startForeground(NOTIFICATION_ID, initialNotification)
-        isServiceRunning = true
-
-        AppLogger.i("V2RayOpsVpnService", "Establishing TUN interface for node: $serverName ($serverEndpoint)")
-
-        try {
-            val builder = Builder()
-                .setSession("V2RayOPS - $serverName")
-                .setMtu(1500)
-                .addAddress("172.19.0.1", 30)
-                .addRoute("0.0.0.0", 0)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("8.8.8.8")
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.setMetered(false)
-            }
-
-            // Exclude V2RayOps app itself so Xray Core's outbound connections to the VPS do not loop into TUN
+        synchronized(connectionLock) {
+            // Clean up previous interface and engine safely
             try {
-                builder.addDisallowedApplication(packageName)
-            } catch (e: Exception) {
-                AppLogger.w("V2RayOpsVpnService", "Could not disallow package from VPN: ${e.message}")
+                vpnInterface?.close()
+            } catch (t: Throwable) {
+                AppLogger.w("V2RayOpsVpnService", "Error closing previous vpnInterface: ${t.message}")
+            }
+            vpnInterface = null
+
+            try {
+                xrayEngine.stop()
+            } catch (t: Throwable) {
+                AppLogger.w("V2RayOpsVpnService", "Error stopping previous xray engine: ${t.message}")
             }
 
-            val pfd = builder.establish()
-            if (pfd == null) {
-                AppLogger.e("V2RayOpsVpnService", "Failed to establish VPN interface: builder.establish() returned null")
+            // Small release delay so Android OS cleans up the previous TUN file descriptor
+            try {
+                Thread.sleep(120)
+            } catch (_: InterruptedException) {}
+
+            val initialNotification = buildNotification("Connecting to $serverName...")
+            startForeground(NOTIFICATION_ID, initialNotification)
+            isServiceRunning = true
+
+            AppLogger.i("V2RayOpsVpnService", "Establishing TUN interface for node: $serverName ($serverEndpoint)")
+
+            try {
+                val builder = Builder()
+                    .setSession("V2RayOPS - $serverName")
+                    .setMtu(1500)
+                    .addAddress("172.19.0.1", 30)
+                    .addRoute("0.0.0.0", 0)
+                    .addDnsServer("1.1.1.1")
+                    .addDnsServer("8.8.8.8")
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    builder.setMetered(false)
+                }
+
+                // Exclude V2RayOps app itself so Xray Core's outbound connections to the VPS do not loop into TUN
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (e: Exception) {
+                    AppLogger.w("V2RayOpsVpnService", "Could not disallow package from VPN: ${e.message}")
+                }
+
+                val pfd = builder.establish()
+                if (pfd == null) {
+                    AppLogger.e("V2RayOpsVpnService", "Failed to establish VPN interface: builder.establish() returned null")
+                    stopVpnTunnel()
+                    return
+                }
+
+                vpnInterface = pfd
+                val tunFd = pfd.fd
+
+                AppLogger.i("V2RayOpsVpnService", "TUN interface established with fd: $tunFd")
+
+                val result = xrayEngine.start(configJson, tunFd)
+                if (result.isSuccess) {
+                    AppLogger.i("V2RayOpsVpnService", "Xray core engine successfully started on TUN fd $tunFd")
+                    val activeNotification = buildNotification("Protected • Connected to $serverName")
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    manager.notify(NOTIFICATION_ID, activeNotification)
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "Xray startup failed"
+                    AppLogger.e("V2RayOpsVpnService", "Failed to start Xray core: $err")
+                    stopVpnTunnel()
+                }
+            } catch (t: Throwable) {
+                AppLogger.e("V2RayOpsVpnService", "Exception establishing VPN tunnel", t)
                 stopVpnTunnel()
-                return
             }
-
-            vpnInterface = pfd
-            val tunFd = pfd.fd
-
-            AppLogger.i("V2RayOpsVpnService", "TUN interface established with fd: $tunFd")
-
-            val result = xrayEngine.start(configJson, tunFd)
-            if (result.isSuccess) {
-                AppLogger.i("V2RayOpsVpnService", "Xray core engine successfully started on TUN fd $tunFd")
-                val activeNotification = buildNotification("Protected • Connected to $serverName")
-                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                manager.notify(NOTIFICATION_ID, activeNotification)
-            } else {
-                val err = result.exceptionOrNull()?.message ?: "Xray startup failed"
-                AppLogger.e("V2RayOpsVpnService", "Failed to start Xray core: $err")
-                stopVpnTunnel()
-            }
-        } catch (t: Throwable) {
-            AppLogger.e("V2RayOpsVpnService", "Exception establishing VPN tunnel", t)
-            stopVpnTunnel()
         }
     }
 
     private fun stopVpnTunnel() {
-        AppLogger.i("V2RayOpsVpnService", "Stopping VPN Service and closing TUN interface")
-        try {
-            vpnInterface?.close()
-        } catch (t: Throwable) {
-            AppLogger.w("V2RayOpsVpnService", "Error closing vpnInterface: ${t.message}")
-        }
-        vpnInterface = null
-
-        try {
-            xrayEngine.stop()
-        } catch (t: Throwable) {
-            AppLogger.w("V2RayOpsVpnService", "Error stopping xray engine: ${t.message}")
-        }
-
-        isServiceRunning = false
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
+        synchronized(connectionLock) {
+            AppLogger.i("V2RayOpsVpnService", "Stopping VPN Service and closing TUN interface")
+            try {
+                vpnInterface?.close()
+            } catch (t: Throwable) {
+                AppLogger.w("V2RayOpsVpnService", "Error closing vpnInterface: ${t.message}")
             }
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            notificationManager?.cancel(NOTIFICATION_ID)
-        } catch (t: Throwable) {
-            AppLogger.w("V2RayOpsVpnService", "Error removing notification: ${t.message}")
-        }
+            vpnInterface = null
 
-        stopSelf()
+            try {
+                xrayEngine.stop()
+            } catch (t: Throwable) {
+                AppLogger.w("V2RayOpsVpnService", "Error stopping xray engine: ${t.message}")
+            }
+
+            isServiceRunning = false
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                notificationManager?.cancel(NOTIFICATION_ID)
+            } catch (t: Throwable) {
+                AppLogger.w("V2RayOpsVpnService", "Error removing notification: ${t.message}")
+            }
+
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {

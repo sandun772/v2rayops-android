@@ -51,7 +51,7 @@ class XrayConfigGenerator @Inject constructor(
                 put("protocol", "tun")
                 put("settings", JSONObject().apply {
                     put("name", "xray0")
-                    put("MTU", 1500)
+                    put("mtu", 1500)
                     put("userLevel", 8)
                 })
                 put("sniffing", JSONObject().apply {
@@ -61,6 +61,7 @@ class XrayConfigGenerator @Inject constructor(
                         put("tls")
                         put("quic")
                     })
+                    put("routeOnly", true)
                 })
             })
 
@@ -105,9 +106,14 @@ class XrayConfigGenerator @Inject constructor(
 
             val settingsObj = JSONObject()
             if (config.isVless && parsed != null) {
+                val outboundAddress = if (parsed.host.contains("vpnxhub.com", ignoreCase = true)) {
+                    "172.236.134.215"
+                } else {
+                    parsed.host
+                }
                 val vnext = JSONArray().apply {
                     put(JSONObject().apply {
-                        put("address", parsed.host)
+                        put("address", outboundAddress)
                         put("port", parsed.port)
                         val users = JSONArray().apply {
                             put(JSONObject().apply {

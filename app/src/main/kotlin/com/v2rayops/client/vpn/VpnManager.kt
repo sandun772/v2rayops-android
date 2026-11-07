@@ -45,6 +45,7 @@ class VpnManager @Inject constructor(
 
     private var currentConfig: VpnConfig? = null
     private var statsJob: Job? = null
+    private var isConnectInProgress = false
 
     init {
         // Observe Xray engine state reactively
@@ -88,6 +89,11 @@ class VpnManager @Inject constructor(
 
     fun connect(config: VpnConfig) {
         scope.launch {
+            if (isConnectInProgress) {
+                AppLogger.d(TAG, "Connection initiation already in progress, debouncing duplicate request")
+                return@launch
+            }
+            isConnectInProgress = true
             currentConfig = config
             _connectionState.value = ConnectionState.Connecting(config.displayName)
 
@@ -101,6 +107,9 @@ class VpnManager @Inject constructor(
                 AppLogger.e(TAG, "Failed to initiate VPN connection", e)
                 _connectionState.value = ConnectionState.Error(e.message ?: "Failed to generate tunnel configuration")
                 vpnController.stopService()
+            } finally {
+                delay(600)
+                isConnectInProgress = false
             }
         }
     }
@@ -113,6 +122,7 @@ class VpnManager @Inject constructor(
         scope.launch {
             AppLogger.i(TAG, "Disconnect requested")
             _connectionState.value = ConnectionState.Disconnecting
+            isConnectInProgress = false
             stopTrafficPolling()
             vpnController.stopService()
             xrayEngine.stop()

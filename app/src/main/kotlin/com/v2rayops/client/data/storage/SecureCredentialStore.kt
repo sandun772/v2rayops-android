@@ -18,6 +18,9 @@ class SecureCredentialStore @Inject constructor(
         private const val KEY_CUSTOMER_CODE = "secure_customer_code"
         private const val KEY_AUTH_TOKEN = "secure_auth_token"
         private const val KEY_USER_EMAIL = "secure_user_email"
+        private const val KEY_CACHED_CONFIGS = "cached_configs_json"
+        private const val KEY_CACHED_PROFILE = "cached_profile_json"
+        private const val KEY_SELECTED_CONFIG_ID = "selected_config_id"
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -61,6 +64,30 @@ class SecureCredentialStore @Inject constructor(
 
     fun getUserEmail(): String? {
         return prefs.getString(KEY_USER_EMAIL, null)
+    }
+
+    fun saveCachedConfigsJson(json: String) {
+        prefs.edit().putString(KEY_CACHED_CONFIGS, json).apply()
+    }
+
+    fun getCachedConfigsJson(): String? {
+        return prefs.getString(KEY_CACHED_CONFIGS, null)
+    }
+
+    fun saveCachedProfileJson(json: String) {
+        prefs.edit().putString(KEY_CACHED_PROFILE, json).apply()
+    }
+
+    fun getCachedProfileJson(): String? {
+        return prefs.getString(KEY_CACHED_PROFILE, null)
+    }
+
+    fun saveSelectedConfigId(id: Long) {
+        prefs.edit().putLong(KEY_SELECTED_CONFIG_ID, id).apply()
+    }
+
+    fun getSelectedConfigId(): Long? {
+        return if (prefs.contains(KEY_SELECTED_CONFIG_ID)) prefs.getLong(KEY_SELECTED_CONFIG_ID, -1L) else null
     }
 
     fun clear() {
