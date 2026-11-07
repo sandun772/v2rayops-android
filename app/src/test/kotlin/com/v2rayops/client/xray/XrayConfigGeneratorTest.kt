@@ -6,6 +6,7 @@ import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.profiles.ProfileParser
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -58,6 +59,9 @@ class XrayConfigGeneratorTest {
         val routing = json.getJSONObject("routing")
         val rules = routing.getJSONArray("rules")
         assertTrue(rules.length() >= 2)
+        val dnsRule = rules.getJSONObject(0)
+        assertEquals("53", dnsRule.getString("port"))
+        assertEquals("dns-out", dnsRule.getString("outboundTag"))
 
         // Real-Time Stats & Policy validation (Phase 2)
         assertTrue(json.has("stats"))
@@ -87,9 +91,11 @@ class XrayConfigGeneratorTest {
         assertEquals("tls", stream.getString("security"))
         val wsSettings = stream.getJSONObject("wsSettings")
         assertEquals("/v2rayops", wsSettings.getString("path"))
+        assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getString("host"))
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
         val tlsSettings = stream.getJSONObject("tlsSettings")
-        assertTrue(tlsSettings.getBoolean("allowInsecure"))
+        assertFalse(tlsSettings.has("allowInsecure"))
         assertEquals("tiktok.com", tlsSettings.getString("serverName"))
+        assertEquals("sg-v2rayops.vpnxhub.com", tlsSettings.getString("verifyPeerCertByName"))
     }
 }

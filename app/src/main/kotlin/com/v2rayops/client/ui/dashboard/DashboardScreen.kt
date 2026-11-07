@@ -43,6 +43,7 @@ import com.v2rayops.client.designsystem.theme.CyberAccent
 import com.v2rayops.client.designsystem.theme.CyberBackground
 import com.v2rayops.client.designsystem.theme.CyberBorder
 import com.v2rayops.client.designsystem.theme.CyberCard
+import com.v2rayops.client.designsystem.theme.CyberDanger
 import com.v2rayops.client.designsystem.theme.CyberTextMuted
 import com.v2rayops.client.designsystem.theme.CyberTextPrimary
 import com.v2rayops.client.designsystem.theme.CyberWarning
@@ -150,6 +151,42 @@ fun DashboardScreen(
                         }
                     }
                 )
+
+                // Connection Error Banner
+                if (connectionState is ConnectionState.Error) {
+                    val errorMessage = (connectionState as ConnectionState.Error).message
+                    Spacer(modifier = Modifier.height(20.dp))
+                    CyberCard(
+                        backgroundColor = CyberCard,
+                        borderColor = CyberDanger.copy(alpha = 0.6f),
+                        padding = 14.dp
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "Error",
+                                    tint = CyberDanger,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+                                Text(
+                                    text = "Connection Failed",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberDanger
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = errorMessage,
+                                fontSize = 12.sp,
+                                color = CyberTextPrimary,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
 
                 // Honest Architectural Banner if Engine is pending
                 if (connectionState is ConnectionState.Unavailable) {

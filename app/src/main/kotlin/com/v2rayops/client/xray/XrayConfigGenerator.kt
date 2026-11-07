@@ -132,9 +132,17 @@ class XrayConfigGenerator @Inject constructor(
                         }
                         put("realitySettings", realitySettings)
                     } else if (parsed.security == "tls") {
+                        val certName = if (parsed.host.contains("vpnxhub.com", ignoreCase = true)) {
+                            parsed.host
+                        } else if (parsed.sni.contains("vpnxhub.com", ignoreCase = true)) {
+                            parsed.sni
+                        } else {
+                            parsed.host
+                        }
+
                         val tlsSettings = JSONObject().apply {
                             put("serverName", parsed.sni.ifBlank { parsed.host })
-                            put("allowInsecure", true)
+                            put("verifyPeerCertByName", certName)
                             put("fingerprint", "chrome")
                             if (parsed.networkType.equals("ws", ignoreCase = true)) {
                                 put("alpn", JSONArray().apply {
@@ -150,6 +158,7 @@ class XrayConfigGenerator @Inject constructor(
                         val wsSettings = JSONObject().apply {
                             put("path", parsed.wsPath.ifBlank { "/v2rayops" })
                             val hostHeader = parsed.wsHost.ifBlank { parsed.host }
+                            put("host", hostHeader)
                             val headers = JSONObject().apply {
                                 put("Host", hostHeader)
                             }
@@ -194,7 +203,7 @@ class XrayConfigGenerator @Inject constructor(
                 put("inboundTag", JSONArray().apply {
                     put("tun-in")
                 })
-                put("port", 53)
+                put("port", "53")
                 put("network", "tcp,udp")
                 put("outboundTag", "dns-out")
             })
