@@ -242,9 +242,6 @@ class XrayConfigGenerator @Inject constructor(
 
                         val tlsSettings = JSONObject().apply {
                             put("serverName", effectiveSni)
-                            if (parsed.allowInsecure || isAddrSniFronting || effectiveSni != outboundAddress) {
-                                put("allowInsecure", true)
-                            }
                             if (candidateDomains.isNotEmpty()) {
                                 put("verifyPeerCertByName", candidateDomains.joinToString(","))
                             }

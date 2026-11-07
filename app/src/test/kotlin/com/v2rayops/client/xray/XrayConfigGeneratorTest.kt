@@ -100,7 +100,7 @@ class XrayConfigGeneratorTest {
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getString("host"))
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
         val tlsSettings = stream.getJSONObject("tlsSettings")
-        assertTrue(tlsSettings.getBoolean("allowInsecure"))
+        assertFalse(tlsSettings.has("allowInsecure"))
         assertTrue(tlsSettings.getString("verifyPeerCertByName").contains("sg-v2rayops.vpnxhub.com"))
         assertEquals("tiktok.com", tlsSettings.getString("serverName"))
         assertEquals("xudp", proxy.getJSONObject("settings").getString("packetEncoding"))
@@ -133,7 +133,8 @@ class XrayConfigGeneratorTest {
 
         // SNI must be the zero-rated bug host (support.zoom.us)
         assertEquals("support.zoom.us", tlsSettings.getString("serverName"))
-        assertTrue(tlsSettings.getBoolean("allowInsecure"))
+        assertFalse(tlsSettings.has("allowInsecure"))
+        assertTrue(tlsSettings.getString("verifyPeerCertByName").contains("sg-v2rayops.vpnxhub.com"))
 
         // WebSocket Host header must be our VPS domain
         val wsSettings = stream.getJSONObject("wsSettings")
