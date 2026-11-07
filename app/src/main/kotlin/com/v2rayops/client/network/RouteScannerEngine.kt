@@ -51,6 +51,18 @@ enum class SniStatus {
     TCP_FAILED      // Port connection rejected
 }
 
+enum class ScanProfile(
+    val displayName: String,
+    val shortLabel: String,
+    val rounds: Int,
+    val sampleDelayMs: Long,
+    val timeoutPerSampleMs: Int
+) {
+    DEEP_STABILITY("Deep Stability (Multi-Sample)", "DEEP STABILITY", rounds = 3, sampleDelayMs = 350L, timeoutPerSampleMs = 3000),
+    ULTRA_ENDURANCE("Ultra Endurance (5-Round Audit)", "ULTRA 5-ROUND", rounds = 5, sampleDelayMs = 500L, timeoutPerSampleMs = 3500),
+    QUICK_AUDIT("Quick Audit (1-Sample)", "QUICK AUDIT", rounds = 1, sampleDelayMs = 0L, timeoutPerSampleMs = 2500)
+}
+
 data class SniRouteCandidate(
     val domain: String,                       // Bug host domain (e.g. support.zoom.us)
     val strategy: RouteStrategy,              // STANDARD_SNI or ADDR_SNI
@@ -62,8 +74,19 @@ data class SniRouteCandidate(
     val wsPath: String = "/v2rayops",
     val status: SniStatus = SniStatus.TCP_FAILED,
     val latencyMs: Long = 0L,
-    val errorDetail: String = ""
-)
+    val errorDetail: String = "",
+    val samplesCount: Int = 0,                // Total probe attempts
+    val successCount: Int = 0,                // Successful passes
+    val packetLossPercent: Int = 0,           // Packet loss rate (0 - 100%)
+    val jitterMs: Long = 0L,                  // Latency variance across rounds
+    val minLatencyMs: Long = 0L,              // Minimum recorded latency
+    val maxLatencyMs: Long = 0L,              // Maximum recorded latency
+    val avgLatencyMs: Long = 0L,              // Average latency across successful samples
+    val stabilityScore: Int = 0,              // Stability index (0 - 100%)
+    val isSustainedPass: Boolean = false      // True if 100% pass without loss
+) {
+    val isRockSolid: Boolean get() = status == SniStatus.WS_READY && stabilityScore >= 85 && packetLossPercent == 0
+}
 
 /**
  * Route Scanner Engine:
@@ -138,33 +161,31 @@ class RouteScannerEngine @Inject constructor(
         }
     }
 
-    suspend fun scanCandidate(
-        candidate: SniRouteCandidate,
-        timeoutMs: Int = 3000
-    ): SniRouteCandidate = withContext(dispatchers.io) {
-        val targetHost = candidate.targetHost
-        val port = candidate.targetPort
-        val sni = candidate.sni
-        val wsHost = candidate.wsHost
-        val wsPath = candidate.wsPath
+    private data class SampleProbeResult(
+        val success: Boolean,
+        val isWsReady: Boolean,
+        val latencyMs: Long,
+        val error: String
+    )
 
+    private fun probeSingleSample(
+        targetHost: String,
+        port: Int,
+        sni: String,
+        wsHost: String,
+        wsPath: String,
+        timeoutMs: Int
+    ): SampleProbeResult {
         val startTcp = System.currentTimeMillis()
-
-        // 1. TCP Socket Connect (Resolves domain via system DNS if targetHost is domain)
         val rawSocket: Socket = try {
             val s = Socket()
             s.connect(InetSocketAddress(targetHost, port), timeoutMs)
             s
         } catch (e: Exception) {
             val elapsed = System.currentTimeMillis() - startTcp
-            return@withContext candidate.copy(
-                status = SniStatus.TCP_FAILED,
-                latencyMs = elapsed,
-                errorDetail = e.message ?: "TCP Connect timeout"
-            )
+            return SampleProbeResult(false, false, elapsed, e.message ?: "TCP timeout")
         }
 
-        // 2. TLS Handshake Probe with SNI
         val startTls = System.currentTimeMillis()
         val sslSocket: SSLSocket = try {
             val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
@@ -186,16 +207,10 @@ class RouteScannerEngine @Inject constructor(
         } catch (e: Exception) {
             try { rawSocket.close() } catch (_: Exception) {}
             val elapsed = System.currentTimeMillis() - startTls
-            return@withContext candidate.copy(
-                status = SniStatus.BLOCKED_TIMEOUT,
-                latencyMs = elapsed,
-                errorDetail = "Blocked by carrier: ${e.message ?: "SSL handshake timed out"}"
-            )
+            return SampleProbeResult(false, false, elapsed, e.message ?: "TLS handshake timed out")
         }
 
         val tlsLatency = System.currentTimeMillis() - startTls
-
-        // 3. WebSocket HTTP Upgrade Check
         var wsPassed = false
         var wsError = ""
         try {
@@ -231,34 +246,120 @@ class RouteScannerEngine @Inject constructor(
         }
 
         val totalLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(tlsLatency)
-
-        if (wsPassed) {
-            candidate.copy(
-                status = SniStatus.WS_READY,
-                latencyMs = totalLatency,
-                errorDetail = "HTTP 101 Switching Protocols"
-            )
+        return if (wsPassed) {
+            SampleProbeResult(true, true, totalLatency, "")
+        } else if (wsError.isNotBlank() && (wsError.contains("400") || wsError.contains("HTTP"))) {
+            SampleProbeResult(true, false, totalLatency, wsError)
         } else {
-            candidate.copy(
-                status = SniStatus.TLS_OK,
-                latencyMs = totalLatency,
-                errorDetail = if (wsError.isNotBlank()) "TLS OK ($wsError)" else "TLS OK"
-            )
+            SampleProbeResult(false, false, totalLatency, wsError.ifBlank { "Upgrade failed" })
         }
+    }
+
+    suspend fun scanCandidate(
+        candidate: SniRouteCandidate,
+        profile: ScanProfile = ScanProfile.DEEP_STABILITY
+    ): SniRouteCandidate = withContext(dispatchers.io) {
+        val targetHost = candidate.targetHost
+        val port = candidate.targetPort
+        val sni = candidate.sni
+        val wsHost = candidate.wsHost
+        val wsPath = candidate.wsPath
+
+        val latencies = mutableListOf<Long>()
+        var wsSuccessCount = 0
+        var lastError = ""
+
+        val totalRounds = profile.rounds
+
+        for (round in 1..totalRounds) {
+            if (round > 1 && profile.sampleDelayMs > 0) {
+                kotlinx.coroutines.delay(profile.sampleDelayMs)
+            }
+
+            val result = probeSingleSample(targetHost, port, sni, wsHost, wsPath, profile.timeoutPerSampleMs)
+            if (result.success) {
+                latencies.add(result.latencyMs)
+                if (result.isWsReady) {
+                    wsSuccessCount++
+                }
+            } else {
+                lastError = result.error
+            }
+        }
+
+        val successCount = latencies.size
+        val packetLossPercent = (((totalRounds - successCount).toFloat() / totalRounds.toFloat()) * 100).toInt()
+
+        val avgLatency = if (latencies.isNotEmpty()) latencies.average().toLong() else 0L
+        val minLatency = latencies.minOrNull() ?: 0L
+        val maxLatency = latencies.maxOrNull() ?: 0L
+        val jitter = if (latencies.size > 1) (maxLatency - minLatency) else 0L
+
+        val status = when {
+            wsSuccessCount > 0 -> SniStatus.WS_READY
+            successCount > 0 -> SniStatus.TLS_OK
+            lastError.contains("Connect timeout", ignoreCase = true) || lastError.contains("refused", ignoreCase = true) -> SniStatus.TCP_FAILED
+            else -> SniStatus.BLOCKED_TIMEOUT
+        }
+
+        // Calculate Reliability & Stability Score (0 - 100%)
+        // 60% based on success rate, 25% on low jitter consistency, 15% on latency tier
+        val successRatio = successCount.toFloat() / totalRounds.toFloat()
+        val basePoints = (successRatio * 60.0).toInt()
+
+        val jitterPoints = when {
+            jitter <= 15L -> 25
+            jitter <= 40L -> 20
+            jitter <= 80L -> 14
+            jitter <= 150L -> 8
+            else -> 3
+        }
+
+        val latencyPoints = when {
+            avgLatency in 1L..150L -> 15
+            avgLatency in 151L..250L -> 12
+            avgLatency in 251L..400L -> 8
+            avgLatency > 400L -> 4
+            else -> 0
+        }
+
+        val stabilityScore = if (successCount == 0) 0 else (basePoints + jitterPoints + latencyPoints).coerceIn(0, 100)
+        val isSustainedPass = successCount == totalRounds && wsSuccessCount == totalRounds && jitter <= 60L
+
+        candidate.copy(
+            status = status,
+            latencyMs = avgLatency,
+            avgLatencyMs = avgLatency,
+            minLatencyMs = minLatency,
+            maxLatencyMs = maxLatency,
+            jitterMs = jitter,
+            samplesCount = totalRounds,
+            successCount = successCount,
+            packetLossPercent = packetLossPercent,
+            stabilityScore = stabilityScore,
+            isSustainedPass = isSustainedPass,
+            errorDetail = when {
+                wsSuccessCount == totalRounds -> "Rock-Solid: $totalRounds/$totalRounds Pass (0% Loss, ±${jitter}ms Jitter)"
+                wsSuccessCount > 0 -> "Intermittent WS: $wsSuccessCount/$totalRounds Pass ($packetLossPercent% Loss)"
+                successCount > 0 -> "TLS Only ($lastError)"
+                else -> "Blocked by carrier: ${lastError.ifBlank { "Handshake timed out" }}"
+            }
+        )
     }
 
     suspend fun scanAll(
         candidates: List<SniRouteCandidate> = DEFAULT_CANDIDATES,
+        profile: ScanProfile = ScanProfile.DEEP_STABILITY,
         onProgress: (scanned: Int, total: Int, latest: SniRouteCandidate) -> Unit = { _, _, _ -> }
     ): List<SniRouteCandidate> = coroutineScope {
-        val semaphore = Semaphore(4)
+        val semaphore = Semaphore(3) // Multi-sample stability testing with controlled concurrency to prevent carrier DDoS throttling
         val total = candidates.size
         var scannedCount = 0
 
         val deferredList = candidates.map { candidate ->
             async(dispatchers.io) {
                 semaphore.withPermit {
-                    val result = scanCandidate(candidate)
+                    val result = scanCandidate(candidate, profile)
                     synchronized(this@RouteScannerEngine) {
                         scannedCount++
                         onProgress(scannedCount, total, result)
@@ -270,13 +371,18 @@ class RouteScannerEngine @Inject constructor(
 
         deferredList.awaitAll().sortedWith(
             compareBy<SniRouteCandidate> {
-                when (it.status) {
-                    SniStatus.WS_READY -> 0
-                    SniStatus.TLS_OK -> 1
-                    SniStatus.BLOCKED_TIMEOUT -> 2
-                    SniStatus.TCP_FAILED -> 3
+                when {
+                    it.status == SniStatus.WS_READY && it.stabilityScore >= 80 -> 0 // 1. Top Verified Rock-Solid WS Routes
+                    it.status == SniStatus.WS_READY -> 1                           // 2. WS Ready with minor jitter
+                    it.status == SniStatus.TLS_OK && it.stabilityScore >= 80 -> 2  // 3. Stable TLS
+                    it.status == SniStatus.TLS_OK -> 3                             // 4. TLS Pass
+                    it.status == SniStatus.BLOCKED_TIMEOUT -> 4                    // 5. Blocked
+                    else -> 5                                                      // 6. Port closed
                 }
-            }.thenBy { it.latencyMs }
+            }.thenByDescending { it.stabilityScore }
+             .thenBy { it.packetLossPercent }
+             .thenBy { it.jitterMs }
+             .thenBy { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: Long.MAX_VALUE }
         )
     }
 

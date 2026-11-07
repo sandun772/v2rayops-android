@@ -6,6 +6,7 @@ import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.core.result.AppResult
 import com.v2rayops.client.network.RouteScannerEngine
 import com.v2rayops.client.network.RouteStrategy
+import com.v2rayops.client.network.ScanProfile
 import com.v2rayops.client.network.SniCategory
 import com.v2rayops.client.network.SniRouteCandidate
 import com.v2rayops.client.network.SniStatus
@@ -39,6 +40,9 @@ class RouteFinderViewModel @Inject constructor(
     private val _activeStrategy = MutableStateFlow<RouteStrategy?>(null)
     val activeStrategy: StateFlow<RouteStrategy?> = _activeStrategy.asStateFlow()
 
+    private val _activeScanProfile = MutableStateFlow<ScanProfile>(ScanProfile.DEEP_STABILITY)
+    val activeScanProfile: StateFlow<ScanProfile> = _activeScanProfile.asStateFlow()
+
     private val _appliedRouteKey = MutableStateFlow<String?>(null)
     val appliedRouteKey: StateFlow<String?> = _appliedRouteKey.asStateFlow()
 
@@ -55,12 +59,20 @@ class RouteFinderViewModel @Inject constructor(
             _isScanning.value = true
             _scannedCount.value = 0
             _statusMessage.value = null
-            val currentList = _candidates.value.map { it.copy(status = SniStatus.TCP_FAILED, latencyMs = 0L) }
+            val currentList = _candidates.value.map {
+                it.copy(
+                    status = SniStatus.TCP_FAILED,
+                    latencyMs = 0L,
+                    avgLatencyMs = 0L,
+                    stabilityScore = 0,
+                    packetLossPercent = 0
+                )
+            }
             _candidates.value = currentList
             _totalCount.value = currentList.size
 
             try {
-                val results = routeScannerEngine.scanAll(currentList) { scanned, total, latest ->
+                val results = routeScannerEngine.scanAll(currentList, _activeScanProfile.value) { scanned, total, latest ->
                     _scannedCount.value = scanned
                     _totalCount.value = total
                     val updated = _candidates.value.map {
@@ -71,7 +83,7 @@ class RouteFinderViewModel @Inject constructor(
                 _candidates.value = results
                 val best = results.firstOrNull { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
                 if (best != null) {
-                    _statusMessage.value = "Fastest Route: [${best.strategy.shortTag}] ${best.domain} (${best.latencyMs}ms)"
+                    _statusMessage.value = "Best Verified: [${best.strategy.shortTag}] ${best.domain} (${best.stabilityScore}% Stable • ${best.avgLatencyMs}ms • ${best.packetLossPercent}% Loss)"
                 }
             } catch (e: Exception) {
                 AppLogger.e("RouteFinderVM", "Error running route scan: ${e.message}")
@@ -94,6 +106,12 @@ class RouteFinderViewModel @Inject constructor(
                 is AppResult.Loading -> Unit
             }
         }
+    }
+
+    fun setScanProfile(profile: ScanProfile) {
+        if (_activeScanProfile.value == profile) return
+        _activeScanProfile.value = profile
+        startScan()
     }
 
     fun addCustomHost(rawDomain: String, strategy: RouteStrategy) {
@@ -129,18 +147,23 @@ class RouteFinderViewModel @Inject constructor(
         _totalCount.value = updated.size
 
         viewModelScope.launch {
-            val scanned = routeScannerEngine.scanCandidate(newCandidate)
+            val scanned = routeScannerEngine.scanCandidate(newCandidate, _activeScanProfile.value)
             _candidates.value = _candidates.value.map {
                 if (it.domain == scanned.domain && it.strategy == scanned.strategy) scanned else it
             }.sortedWith(
                 compareBy<SniRouteCandidate> {
-                    when (it.status) {
-                        SniStatus.WS_READY -> 0
-                        SniStatus.TLS_OK -> 1
-                        SniStatus.BLOCKED_TIMEOUT -> 2
-                        SniStatus.TCP_FAILED -> 3
+                    when {
+                        it.status == SniStatus.WS_READY && it.stabilityScore >= 80 -> 0
+                        it.status == SniStatus.WS_READY -> 1
+                        it.status == SniStatus.TLS_OK && it.stabilityScore >= 80 -> 2
+                        it.status == SniStatus.TLS_OK -> 3
+                        it.status == SniStatus.BLOCKED_TIMEOUT -> 4
+                        else -> 5
                     }
-                }.thenBy { it.latencyMs }
+                }.thenByDescending { it.stabilityScore }
+                 .thenBy { it.packetLossPercent }
+                 .thenBy { it.jitterMs }
+                 .thenBy { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: Long.MAX_VALUE }
             )
         }
     }

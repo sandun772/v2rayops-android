@@ -77,6 +77,7 @@ import com.v2rayops.client.designsystem.theme.CyberTextPrimary
 import com.v2rayops.client.designsystem.theme.CyberTextSecondary
 import com.v2rayops.client.designsystem.theme.CyberWarning
 import com.v2rayops.client.network.RouteStrategy
+import com.v2rayops.client.network.ScanProfile
 import com.v2rayops.client.network.SniCategory
 import com.v2rayops.client.network.SniRouteCandidate
 import com.v2rayops.client.network.SniStatus
@@ -92,6 +93,7 @@ fun RouteFinderScreen(
     val totalCount by viewModel.totalCount.collectAsState()
     val activeCategory by viewModel.activeCategory.collectAsState()
     val activeStrategy by viewModel.activeStrategy.collectAsState()
+    val activeScanProfile by viewModel.activeScanProfile.collectAsState()
     val appliedRouteKey by viewModel.appliedRouteKey.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
 
@@ -152,7 +154,7 @@ fun RouteFinderScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterPill(
@@ -173,6 +175,40 @@ fun RouteFinderScreen(
                     onClick = { viewModel.setStrategy(RouteStrategy.ADDR_SNI) },
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            // Stability Scan Profile Selector: [ DEEP STABILITY (MULTI-ROUND) | ULTRA 5-ROUND | QUICK AUDIT ]
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ScanProfile.values().forEach { profile ->
+                    val isSelected = activeScanProfile == profile
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) CyberCardElevated else CyberCard)
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) CyberAccent else CyberBorderSubtle,
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .clickable(enabled = !isScanning) { viewModel.setScanProfile(profile) }
+                            .padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = profile.shortLabel,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (isSelected) CyberAccent else CyberTextMuted
+                        )
+                    }
+                }
             }
 
             // Category Filter Pills
@@ -339,7 +375,7 @@ fun RouteFinderScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "APPLY FASTEST [${bestRoute.strategy.shortTag}] ${bestRoute.domain} (${bestRoute.latencyMs}ms)",
+                        text = "APPLY BEST [${bestRoute.strategy.shortTag}] ${bestRoute.domain} (${bestRoute.stabilityScore}% • ${bestRoute.avgLatencyMs}ms)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -544,6 +580,31 @@ private fun RouteCandidateCard(
                         )
                     }
 
+                    // Stability Score Pill
+                    if (candidate.samplesCount > 0 && candidate.stabilityScore > 0) {
+                        val stabilityColor = when {
+                            candidate.isRockSolid -> CyberSuccess
+                            candidate.stabilityScore >= 70 -> CyberAccent
+                            candidate.stabilityScore > 0 -> CyberWarning
+                            else -> CyberDanger
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(stabilityColor.copy(alpha = 0.15f))
+                                .border(1.dp, stabilityColor.copy(alpha = 0.4f), RoundedCornerShape(3.dp))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (candidate.isRockSolid) "ROCK SOLID ${candidate.stabilityScore}%" else "${candidate.stabilityScore}% STABLE",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = stabilityColor
+                            )
+                        }
+                    }
+
                     if (candidate.latencyMs > 0L) {
                         Text(
                             text = "${candidate.latencyMs}ms",
@@ -553,6 +614,17 @@ private fun RouteCandidateCard(
                             color = if (candidate.latencyMs < 400) CyberSuccess else if (candidate.latencyMs < 1000) CyberWarning else CyberDanger
                         )
                     }
+                }
+
+                if (candidate.samplesCount > 1) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = "${candidate.successCount}/${candidate.samplesCount} Pass • ${candidate.packetLossPercent}% Loss • ±${candidate.jitterMs}ms Jitter • avg ${candidate.avgLatencyMs}ms (${candidate.minLatencyMs}-${candidate.maxLatencyMs}ms)",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (candidate.packetLossPercent == 0) CyberSuccess.copy(alpha = 0.9f) else CyberWarning,
+                        maxLines = 1
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(3.dp))
