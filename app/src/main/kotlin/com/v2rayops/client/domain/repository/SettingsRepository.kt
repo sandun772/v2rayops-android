@@ -16,4 +16,5 @@ interface SettingsRepository {
     suspend fun setSmartQoSEnabled(enabled: Boolean)
     suspend fun setDownloadSpeedLimitMbps(limitMbps: Int)
     suspend fun setCellularMtuOptimized(optimized: Boolean)
+    suspend fun setTcpBufferSizeKb(sizeKb: Int)
 }

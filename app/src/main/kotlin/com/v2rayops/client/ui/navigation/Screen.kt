@@ -7,4 +7,5 @@ sealed class Screen(val route: String) {
     data object ServerSelection : Screen("servers")
     data object Settings : Screen("settings")
     data object Logs : Screen("logs")
+    data object Optimizer : Screen("optimizer")
 }

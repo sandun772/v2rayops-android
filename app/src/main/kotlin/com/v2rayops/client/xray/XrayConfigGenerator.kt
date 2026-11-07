@@ -347,8 +347,8 @@ class XrayConfigGenerator @Inject constructor(
                     put("connIdle", 300)
                     put("uplinkOnly", 1)
                     put("downlinkOnly", 1)
-                    // Smart QoS: Restrict buffer size to 32KB to apply TCP sliding window backpressure and mitigate bufferbloat
-                    val bufKb = if (settings.smartQoSEnabled) 32 else 64
+                    // Smart QoS: Restrict buffer size to apply TCP sliding window backpressure and mitigate bufferbloat
+                    val bufKb = if (settings.smartQoSEnabled) settings.tcpBufferSizeKb.coerceIn(16, 128) else 64
                     put("bufferSize", bufKb)
                 }
                 put("8", level8)

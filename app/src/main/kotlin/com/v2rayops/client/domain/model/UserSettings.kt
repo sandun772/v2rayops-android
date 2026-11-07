@@ -17,5 +17,6 @@ data class UserSettings(
     val preferredProtocol: String = "vless",
     val smartQoSEnabled: Boolean = true,
     val downloadSpeedLimitMbps: Int = 0,
-    val cellularMtuOptimized: Boolean = true
+    val cellularMtuOptimized: Boolean = true,
+    val tcpBufferSizeKb: Int = 32
 )

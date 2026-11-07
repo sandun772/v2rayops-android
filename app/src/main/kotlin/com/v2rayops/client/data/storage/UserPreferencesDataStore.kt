@@ -35,6 +35,7 @@ class UserPreferencesDataStore @Inject constructor(
         val SMART_QOS = booleanPreferencesKey("smart_qos_enabled")
         val SPEED_LIMIT_MBPS = intPreferencesKey("download_speed_limit_mbps")
         val CELLULAR_MTU = booleanPreferencesKey("cellular_mtu_optimized")
+        val TCP_BUFFER_SIZE_KB = intPreferencesKey("tcp_buffer_size_kb")
     }
 
     val userSettingsFlow: Flow<UserSettings> = context.dataStore.data.map { preferences ->
@@ -56,7 +57,8 @@ class UserPreferencesDataStore @Inject constructor(
             preferredProtocol = preferences[PreferencesKeys.PREFERRED_PROTOCOL] ?: "vless",
             smartQoSEnabled = preferences[PreferencesKeys.SMART_QOS] ?: true,
             downloadSpeedLimitMbps = preferences[PreferencesKeys.SPEED_LIMIT_MBPS] ?: 0,
-            cellularMtuOptimized = preferences[PreferencesKeys.CELLULAR_MTU] ?: true
+            cellularMtuOptimized = preferences[PreferencesKeys.CELLULAR_MTU] ?: true,
+            tcpBufferSizeKb = preferences[PreferencesKeys.TCP_BUFFER_SIZE_KB] ?: 32
         )
     }
 
@@ -98,5 +100,9 @@ class UserPreferencesDataStore @Inject constructor(
 
     suspend fun setCellularMtuOptimized(optimized: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.CELLULAR_MTU] = optimized }
+    }
+
+    suspend fun setTcpBufferSizeKb(sizeKb: Int) {
+        context.dataStore.edit { it[PreferencesKeys.TCP_BUFFER_SIZE_KB] = sizeKb }
     }
 }

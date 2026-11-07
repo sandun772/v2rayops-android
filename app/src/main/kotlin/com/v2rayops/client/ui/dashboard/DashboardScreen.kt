@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -64,6 +65,7 @@ fun DashboardScreen(
     onNavigateToServers: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToLogs: () -> Unit,
+    onNavigateToOptimizer: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -99,6 +101,13 @@ fun DashboardScreen(
                 title = "V2RAYOPS",
                 logoRes = com.v2rayops.client.R.drawable.v2rayops_logo,
                 actions = {
+                    IconButton(onClick = onNavigateToOptimizer) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Network Optimizer",
+                            tint = CyberAccent
+                        )
+                    }
                     IconButton(onClick = { showImportDialog = true }) {
                         Icon(
                             imageVector = Icons.Default.AddLink,

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -66,6 +67,7 @@ fun SettingsScreen(
     onBackClick: () -> Unit,
     onLogoutSuccess: () -> Unit,
     onNavigateToLogs: () -> Unit,
+    onNavigateToOptimizer: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val settings by viewModel.settings.collectAsState()
@@ -259,6 +261,51 @@ fun SettingsScreen(
                         }
                         Text(
                             text = "Phase 1 Foundation",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = CyberAccent
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Network Optimizer Entry Point
+                CyberCard(
+                    padding = 16.dp,
+                    borderColor = CyberAccent.copy(alpha = 0.7f),
+                    onClick = onNavigateToOptimizer
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Network Optimizer",
+                                tint = CyberAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Network Tuning & Diagnostic Studio",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = CyberTextPrimary
+                                )
+                                Text(
+                                    text = "Analyze carrier, jitter, PMTU, and auto-tune V2Ray",
+                                    fontSize = 12.sp,
+                                    color = CyberTextMuted
+                                )
+                            }
+                        }
+                        Text(
+                            text = "TUNE →",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,

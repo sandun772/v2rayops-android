@@ -54,4 +54,8 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun setCellularMtuOptimized(optimized: Boolean) {
         preferencesDataStore.setCellularMtuOptimized(optimized)
     }
+
+    override suspend fun setTcpBufferSizeKb(sizeKb: Int) {
+        preferencesDataStore.setTcpBufferSizeKb(sizeKb)
+    }
 }
