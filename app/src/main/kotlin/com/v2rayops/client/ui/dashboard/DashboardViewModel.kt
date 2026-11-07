@@ -9,8 +9,12 @@ import com.v2rayops.client.domain.model.UserProfile
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.domain.repository.AuthRepository
 import com.v2rayops.client.domain.repository.SubscriptionRepository
+import com.v2rayops.client.network.ConnectionDiagnosticResult
+import com.v2rayops.client.network.ConnectionDiagnosticsManager
+import com.v2rayops.client.network.DiagnosticStatus
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +28,8 @@ import javax.inject.Inject
 class DashboardViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val subscriptionRepository: SubscriptionRepository,
-    private val vpnManager: VpnManager
+    private val vpnManager: VpnManager,
+    private val diagnosticsManager: ConnectionDiagnosticsManager
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
@@ -42,8 +47,40 @@ class DashboardViewModel @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    private val _diagnosticResult = MutableStateFlow<ConnectionDiagnosticResult?>(null)
+    val diagnosticResult: StateFlow<ConnectionDiagnosticResult?> = _diagnosticResult.asStateFlow()
+
+    private val _isTestingConnection = MutableStateFlow(false)
+    val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
+
     init {
         refreshDashboard()
+        observeConnectionForDiagnostics()
+    }
+
+    private fun observeConnectionForDiagnostics() {
+        viewModelScope.launch {
+            connectionState.collect { state ->
+                if (state is ConnectionState.Connected) {
+                    // Small delay to ensure tunnel socket is fully warmed up
+                    delay(1200)
+                    runConnectionTest()
+                } else if (state is ConnectionState.Disconnected) {
+                    _diagnosticResult.value = null
+                }
+            }
+        }
+    }
+
+    fun runConnectionTest() {
+        viewModelScope.launch {
+            _isTestingConnection.value = true
+            _diagnosticResult.value = _diagnosticResult.value?.copy(status = DiagnosticStatus.TESTING)
+                ?: ConnectionDiagnosticResult(status = DiagnosticStatus.TESTING)
+            val result = diagnosticsManager.runDiagnosticTest()
+            _diagnosticResult.value = result
+            _isTestingConnection.value = false
+        }
     }
 
     fun refreshDashboard() {

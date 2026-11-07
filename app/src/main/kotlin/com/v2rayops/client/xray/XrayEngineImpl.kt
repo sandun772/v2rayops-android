@@ -206,4 +206,17 @@ class XrayEngineImpl @Inject constructor(
             )
         }
     }
+
+    override fun measureDelay(url: String): Long {
+        val ctrl = controller
+        if (ctrl == null || !ctrl.isRunning) {
+            return -1L
+        }
+        return try {
+            ctrl.measureDelay(url)
+        } catch (t: Throwable) {
+            AppLogger.d(TAG, "measureDelay failed: ${t.message}")
+            -1L
+        }
+    }
 }

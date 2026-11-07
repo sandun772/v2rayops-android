@@ -45,7 +45,7 @@ class XrayConfigGeneratorTest {
         val inbounds = json.getJSONArray("inbounds")
         assertEquals(3, inbounds.length())
         assertEquals("tun", inbounds.getJSONObject(0).getString("protocol"))
-        assertEquals("tun-in", inbounds.getJSONObject(0).getString("tag"))
+        assertEquals("tun", inbounds.getJSONObject(0).getString("tag"))
         assertEquals(10808, inbounds.getJSONObject(1).getInt("port"))
         assertEquals(10809, inbounds.getJSONObject(2).getInt("port"))
 

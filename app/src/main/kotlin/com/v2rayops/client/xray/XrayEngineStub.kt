@@ -52,4 +52,6 @@ class XrayEngineStub @Inject constructor() : XrayEngine {
             totalDownloadBytes = 0
         )
     }
+
+    override fun measureDelay(url: String): Long = -1L
 }

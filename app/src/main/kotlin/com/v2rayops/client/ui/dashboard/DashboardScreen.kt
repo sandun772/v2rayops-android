@@ -50,6 +50,7 @@ import com.v2rayops.client.designsystem.theme.CyberWarning
 import com.v2rayops.client.domain.model.ConnectionState
 import com.v2rayops.client.ui.dashboard.components.ActiveServerCard
 import com.v2rayops.client.ui.dashboard.components.ConnectionButton
+import com.v2rayops.client.ui.dashboard.components.ConnectionDiagnosticsCard
 import com.v2rayops.client.ui.dashboard.components.StatsCard
 
 @Composable
@@ -64,6 +65,8 @@ fun DashboardScreen(
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val diagnosticResult by viewModel.diagnosticResult.collectAsState()
+    val isTestingConnection by viewModel.isTestingConnection.collectAsState()
 
     val vpnPrepareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -221,6 +224,16 @@ fun DashboardScreen(
                 ActiveServerCard(
                     config = selectedConfig,
                     onClick = onNavigateToServers
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Connection Diagnostics & Real IP Verification Card
+                ConnectionDiagnosticsCard(
+                    result = diagnosticResult,
+                    isTesting = isTestingConnection,
+                    isVpnConnected = connectionState.isConnected,
+                    onRunTest = { viewModel.runConnectionTest() }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))

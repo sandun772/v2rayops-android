@@ -40,12 +40,13 @@ class XrayConfigGenerator @Inject constructor(
         val inbounds = JSONArray().apply {
             // Layer 3 TUN inbound for native Android VpnService capture
             put(JSONObject().apply {
-                put("tag", "tun-in")
+                put("tag", "tun")
                 put("port", 0)
                 put("protocol", "tun")
                 put("settings", JSONObject().apply {
-                    put("name", "tun0")
-                    put("mtu", 1500)
+                    put("name", "xray0")
+                    put("MTU", 1500)
+                    put("userLevel", 8)
                 })
                 put("sniffing", JSONObject().apply {
                     put("enabled", true)
@@ -59,13 +60,14 @@ class XrayConfigGenerator @Inject constructor(
 
             // Local SOCKS inbound
             put(JSONObject().apply {
-                put("tag", "socks-in")
+                put("tag", "socks")
                 put("port", 10808)
                 put("listen", "127.0.0.1")
                 put("protocol", "socks")
                 put("settings", JSONObject().apply {
                     put("auth", "noauth")
                     put("udp", true)
+                    put("userLevel", 8)
                 })
                 put("sniffing", JSONObject().apply {
                     put("enabled", true)
@@ -79,7 +81,7 @@ class XrayConfigGenerator @Inject constructor(
 
             // Local HTTP inbound
             put(JSONObject().apply {
-                put("tag", "http-in")
+                put("tag", "http")
                 put("port", 10809)
                 put("listen", "127.0.0.1")
                 put("protocol", "http")
@@ -201,7 +203,9 @@ class XrayConfigGenerator @Inject constructor(
             rules.put(JSONObject().apply {
                 put("type", "field")
                 put("inboundTag", JSONArray().apply {
+                    put("tun")
                     put("tun-in")
+                    put("socks")
                 })
                 put("port", "53")
                 put("network", "tcp,udp")
@@ -232,8 +236,11 @@ class XrayConfigGenerator @Inject constructor(
             rules.put(JSONObject().apply {
                 put("type", "field")
                 put("inboundTag", JSONArray().apply {
+                    put("tun")
                     put("tun-in")
+                    put("socks")
                     put("socks-in")
+                    put("http")
                     put("http-in")
                 })
                 put("outboundTag", "proxy")
@@ -253,6 +260,17 @@ class XrayConfigGenerator @Inject constructor(
         // 6. Real-Time Outbound Traffic Statistics & System Policy
         root.put("stats", JSONObject())
         val policy = JSONObject().apply {
+            val levels = JSONObject().apply {
+                val level8 = JSONObject().apply {
+                    put("handshake", 4)
+                    put("connIdle", 300)
+                    put("uplinkOnly", 1)
+                    put("downlinkOnly", 1)
+                }
+                put("8", level8)
+            }
+            put("levels", levels)
+
             val system = JSONObject().apply {
                 put("statsOutboundUplink", true)
                 put("statsOutboundDownlink", true)

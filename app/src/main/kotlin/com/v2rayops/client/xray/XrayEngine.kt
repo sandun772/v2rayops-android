@@ -21,4 +21,5 @@ interface XrayEngine {
     fun start(configJson: String, tunFd: Int = 0): Result<Unit>
     fun stop(): Result<Unit>
     fun queryTrafficStats(): TrafficStats
+    fun measureDelay(url: String = "https://cp.cloudflare.com/generate_204"): Long
 }
