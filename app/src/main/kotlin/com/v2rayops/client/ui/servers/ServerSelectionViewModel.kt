@@ -37,6 +37,18 @@ class ServerSelectionViewModel @Inject constructor(
         subscriptionRepository.selectConfig(config)
     }
 
+    fun importConfig(rawUri: String): String? {
+        return when (val res = subscriptionRepository.importManualConfig(rawUri)) {
+            is com.v2rayops.client.core.result.AppResult.Success -> null
+            is com.v2rayops.client.core.result.AppResult.Failure -> res.error.message
+            else -> null
+        }
+    }
+
+    fun deleteConfig(configId: Long) {
+        subscriptionRepository.deleteConfig(configId)
+    }
+
     fun refreshConfigs() {
         viewModelScope.launch {
             _isRefreshing.value = true

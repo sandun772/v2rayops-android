@@ -227,6 +227,23 @@ fun LoginScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Dev & Offline Direct Access
+            CyberButton(
+                onClick = { viewModel.loginDevOfflineMode() },
+                variant = com.v2rayops.client.designsystem.components.CyberButtonVariant.SECONDARY,
+                enabled = !isLoading
+            ) {
+                Text(
+                    text = "CONTINUE IN DEV / OFFLINE MODE",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = CyberAccent
+                )
+            }
+
             Spacer(modifier = Modifier.height(28.dp))
 
             // Help info card

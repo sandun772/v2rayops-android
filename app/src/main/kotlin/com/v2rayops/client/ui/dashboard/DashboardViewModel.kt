@@ -77,8 +77,23 @@ class DashboardViewModel @Inject constructor(
             _isTestingConnection.value = true
             _diagnosticResult.value = _diagnosticResult.value?.copy(status = DiagnosticStatus.TESTING)
                 ?: ConnectionDiagnosticResult(status = DiagnosticStatus.TESTING)
-            val result = diagnosticsManager.runDiagnosticTest()
+            val result = diagnosticsManager.runDiagnosticTest(selectedConfig.value)
             _diagnosticResult.value = result
+            _isTestingConnection.value = false
+        }
+    }
+
+    fun runNodeProbe() {
+        viewModelScope.launch {
+            val config = selectedConfig.value ?: return@launch
+            _isTestingConnection.value = true
+            val probe = diagnosticsManager.probeTargetNode(config)
+            _diagnosticResult.value = ConnectionDiagnosticResult(
+                status = if (probe.tcpSuccess) DiagnosticStatus.SUCCESS else DiagnosticStatus.FAILED,
+                pingMs = if (probe.tlsLatencyMs > 0) probe.tlsLatencyMs else probe.tcpLatencyMs,
+                message = probe.summary,
+                debugDetails = "Endpoint: ${probe.endpoint} • SNI: ${probe.sni}"
+            )
             _isTestingConnection.value = false
         }
     }
@@ -96,6 +111,18 @@ class DashboardViewModel @Inject constructor(
                 subscriptionRepository.syncConfigs(code)
             }
             _isRefreshing.value = false
+        }
+    }
+
+    fun selectConfig(config: VpnConfig) {
+        subscriptionRepository.selectConfig(config)
+    }
+
+    fun importConfig(rawUri: String): String? {
+        return when (val res = subscriptionRepository.importManualConfig(rawUri)) {
+            is AppResult.Success -> null
+            is AppResult.Failure -> res.error.message
+            else -> null
         }
     }
 

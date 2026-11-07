@@ -247,6 +247,25 @@ fun ConnectionDiagnosticsCard(
                         lineHeight = 15.sp
                     )
                 }
+
+                if (result.debugDetails.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF04060A), RoundedCornerShape(4.dp))
+                            .border(1.dp, CyberBorder, RoundedCornerShape(4.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = result.debugDetails,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberAccent,
+                            lineHeight = 14.sp
+                        )
+                    }
+                }
             } else {
                 // Idle state before any test
                 Column(

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -28,6 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.v2rayops.client.designsystem.components.CyberCard
 import com.v2rayops.client.designsystem.components.CyberTopAppBar
+import com.v2rayops.client.designsystem.components.ImportConfigDialog
 import com.v2rayops.client.designsystem.components.StatusBadge
 import com.v2rayops.client.designsystem.components.StatusIndicatorType
 import com.v2rayops.client.designsystem.theme.CyberAccent
@@ -69,6 +74,7 @@ fun DashboardScreen(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
     val isTestingConnection by viewModel.isTestingConnection.collectAsState()
+    var showImportDialog by remember { mutableStateOf(false) }
 
     val vpnPrepareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -93,6 +99,13 @@ fun DashboardScreen(
                 title = "V2RAYOPS",
                 logoRes = com.v2rayops.client.R.drawable.v2rayops_logo,
                 actions = {
+                    IconButton(onClick = { showImportDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.AddLink,
+                            contentDescription = "Import V2Ray Config",
+                            tint = CyberAccent
+                        )
+                    }
                     IconButton(onClick = { viewModel.refreshDashboard() }, enabled = !isRefreshing) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
@@ -256,6 +269,13 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
             }
+        }
+
+        if (showImportDialog) {
+            ImportConfigDialog(
+                onDismiss = { showImportDialog = false },
+                onImport = { viewModel.importConfig(it) }
+            )
         }
     }
 }

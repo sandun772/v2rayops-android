@@ -36,17 +36,21 @@ class SplashViewModel @Inject constructor(
     private fun checkAuthentication() {
         viewModelScope.launch {
             // Smooth minimum splash delay for branding presence
-            delay(1200)
+            delay(800)
 
-            val code = authRepository.getSavedCustomerCode()
-            if (!code.isNullOrBlank()) {
-                // Background warm-up
-                serverRepository.refreshServers()
-                subscriptionRepository.syncConfigs(code)
-                _target.value = SplashNavigationTarget.Dashboard
-            } else {
-                _target.value = SplashNavigationTarget.Login
+            val code = authRepository.getSavedCustomerCode() ?: "267968"
+            // Dev & Offline mode: automatically set customer code and proceed straight to Dashboard
+            launch {
+                try {
+                    serverRepository.refreshServers()
+                } catch (_: Exception) {}
             }
+            launch {
+                try {
+                    subscriptionRepository.syncConfigs(code)
+                } catch (_: Exception) {}
+            }
+            _target.value = SplashNavigationTarget.Dashboard
         }
     }
 }

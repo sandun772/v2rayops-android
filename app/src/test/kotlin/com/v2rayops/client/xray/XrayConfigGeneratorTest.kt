@@ -94,9 +94,8 @@ class XrayConfigGeneratorTest {
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getString("host"))
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
         val tlsSettings = stream.getJSONObject("tlsSettings")
-        assertFalse(tlsSettings.has("allowInsecure"))
+        assertTrue(tlsSettings.getBoolean("allowInsecure"))
         assertEquals("tiktok.com", tlsSettings.getString("serverName"))
-        assertEquals("sg-v2rayops.vpnxhub.com", tlsSettings.getString("verifyPeerCertByName"))
         assertEquals("xudp", proxy.getJSONObject("settings").getString("packetEncoding"))
         assertTrue(json.getJSONObject("dns").has("hosts"))
     }

@@ -23,14 +23,18 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,10 +54,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.core.logger.LogEntry
 import com.v2rayops.client.core.logger.LogLevel
 import com.v2rayops.client.designsystem.components.CyberTopAppBar
+import com.v2rayops.client.designsystem.components.ImportConfigDialog
 import com.v2rayops.client.designsystem.theme.CyberAccent
 import com.v2rayops.client.designsystem.theme.CyberBackground
 import com.v2rayops.client.designsystem.theme.CyberBorder
@@ -81,15 +87,19 @@ enum class LogFilter(val label: String) {
 
 @Composable
 fun DevLogsScreen(
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    viewModel: DevLogsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val allLogs by AppLogger.logsFlow.collectAsState()
+    val isProbing by viewModel.isProbing.collectAsState()
+    val lastProbeReport by viewModel.lastProbeReport.collectAsState()
 
     var selectedFilter by remember { mutableStateOf(LogFilter.ALL) }
     var isCopied by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     val filteredLogs = remember(allLogs, selectedFilter) {
@@ -99,7 +109,7 @@ fun DevLogsScreen(
             LogFilter.WARN -> allLogs.filter { it.level == LogLevel.WARN }
             LogFilter.VPN -> allLogs.filter { it.tag.contains("Vpn", ignoreCase = true) }
             LogFilter.XRAY -> allLogs.filter { it.tag.contains("Xray", ignoreCase = true) }
-            LogFilter.DIAG -> allLogs.filter { it.tag.contains("Diagnostic", ignoreCase = true) }
+            LogFilter.DIAG -> allLogs.filter { it.tag.contains("Diagnostic", ignoreCase = true) || it.tag.contains("Probe", ignoreCase = true) }
         }
     }
 
@@ -128,9 +138,34 @@ fun DevLogsScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             // Top App Bar
             CyberTopAppBar(
-                title = "DEV LOGS",
+                title = "DEV LOGS & DIAGNOSTICS",
                 onBackClick = onBackClick,
                 actions = {
+                    IconButton(onClick = { showImportDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.AddLink,
+                            contentDescription = "Import V2Ray Config",
+                            tint = CyberAccent
+                        )
+                    }
+                    IconButton(
+                        onClick = { viewModel.runProbe() },
+                        enabled = !isProbing
+                    ) {
+                        if (isProbing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = CyberAccent
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.NetworkCheck,
+                                contentDescription = "Run Probe",
+                                tint = CyberAccent
+                            )
+                        }
+                    }
                     IconButton(onClick = { AppLogger.clear() }) {
                         Icon(
                             imageVector = Icons.Default.DeleteSweep,
@@ -145,14 +180,14 @@ fun DevLogsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
                 // Easy Copy Button
                 Button(
                     onClick = { copyLogsToClipboard() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .height(44.dp),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isCopied) CyberSuccess else CyberPrimary
@@ -162,19 +197,90 @@ fun DevLogsScreen(
                         imageVector = if (isCopied) Icons.Default.Check else Icons.Default.ContentCopy,
                         contentDescription = "Copy",
                         tint = Color.White,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (isCopied) "COPIED TO CLIPBOARD ✓" else "COPY ALL LOGS (${allLogs.size} ENTRIES)",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         letterSpacing = 0.5.sp,
                         color = Color.White
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Node Pre-flight Probe Button & Banner
+                OutlinedButton(
+                    onClick = { viewModel.runProbe() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CyberAccent.copy(alpha = 0.7f)),
+                    enabled = !isProbing
+                ) {
+                    if (isProbing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = CyberAccent
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "PROBING NODE (DNS, TCP, TLS, WS)...",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberAccent
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.NetworkCheck,
+                            contentDescription = "Probe",
+                            tint = CyberAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "RUN SOCKET & BUG HOST PROBE",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberAccent
+                        )
+                    }
+                }
+
+                if (lastProbeReport != null) {
+                    val report = lastProbeReport!!
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF04060A), RoundedCornerShape(6.dp))
+                            .border(1.dp, if (report.tcpSuccess) CyberSuccess.copy(alpha = 0.5f) else CyberDanger.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "PROBE: ${report.nodeName}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (report.tcpSuccess) CyberSuccess else CyberDanger
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = report.summary,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Filter Chips Row
                 Row(
@@ -183,130 +289,81 @@ fun DevLogsScreen(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    LogFilter.entries.forEach { filter ->
-                        val isSelected = selectedFilter == filter
-                        val count = remember(allLogs, filter) {
-                            when (filter) {
-                                LogFilter.ALL -> allLogs.size
-                                LogFilter.ERRORS -> allLogs.count { it.level == LogLevel.ERROR }
-                                LogFilter.WARN -> allLogs.count { it.level == LogLevel.WARN }
-                                LogFilter.VPN -> allLogs.count { it.tag.contains("Vpn", ignoreCase = true) }
-                                LogFilter.XRAY -> allLogs.count { it.tag.contains("Xray", ignoreCase = true) }
-                                LogFilter.DIAG -> allLogs.count { it.tag.contains("Diagnostic", ignoreCase = true) }
-                            }
-                        }
-
-                        val chipBg = if (isSelected) CyberAccent.copy(alpha = 0.2f) else CyberCard
-                        val chipBorder = if (isSelected) CyberAccent else CyberBorder
-                        val chipText = if (isSelected) CyberAccent else CyberTextMuted
-
+                    LogFilter.values().forEach { filter ->
+                        val isSelected = filter == selectedFilter
                         Box(
                             modifier = Modifier
-                                .background(chipBg, RoundedCornerShape(6.dp))
-                                .border(1.dp, chipBorder, RoundedCornerShape(6.dp))
+                                .background(
+                                    color = if (isSelected) CyberAccent else CyberCard,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isSelected) CyberAccent else CyberBorderSubtle,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
                                 .clickable { selectedFilter = filter }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = "${filter.label} ($count)",
-                                fontSize = 11.sp,
+                                text = filter.label,
+                                fontSize = 10.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = chipText,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = FontFamily.Monospace,
+                                color = if (isSelected) Color.Black else CyberTextMuted
                             )
                         }
                     }
                 }
             }
 
-            // Terminal View
+            // Logs Output Terminal View
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .background(Color(0xFF030509), RoundedCornerShape(8.dp))
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .background(Color(0xFF020408), RoundedCornerShape(8.dp))
                     .border(1.dp, CyberBorder, RoundedCornerShape(8.dp))
-                    .padding(8.dp)
             ) {
                 if (filteredLogs.isEmpty()) {
-                    Column(
+                    Box(
                         modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No logs matching current filter.",
-                            color = CyberTextMuted,
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Toggle VPN or run a test to stream events.",
-                            color = CyberTextSecondary,
-                            fontSize = 11.sp
+                            text = "No log entries found for filter [${selectedFilter.label}]",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextMuted
                         )
                     }
                 } else {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        items(filteredLogs, key = { it.id }) { log ->
-                            LogItemRow(log = log)
+                        items(filteredLogs, key = { it.timestamp.toString() + it.message.hashCode() }) { log ->
+                            LogItemRow(log)
                         }
                     }
                 }
             }
+        }
 
-            // Bottom Bar status
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Buffered: ${allLogs.size} logs (max 1000)",
-                    fontSize = 11.sp,
-                    color = CyberTextMuted,
-                    fontFamily = FontFamily.Monospace
-                )
-
-                Row(
-                    modifier = Modifier.clickable {
-                        coroutineScope.launch {
-                            if (filteredLogs.isNotEmpty()) {
-                                listState.animateScrollToItem(filteredLogs.size - 1)
-                            }
-                        }
-                    },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Scroll to bottom",
-                        tint = CyberAccent,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Scroll to Latest",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = CyberAccent
-                    )
-                }
-            }
+        if (showImportDialog) {
+            ImportConfigDialog(
+                onDismiss = { showImportDialog = false },
+                onImport = { viewModel.importConfig(it) }
+            )
         }
     }
 }
 
 @Composable
-private fun LogItemRow(log: LogEntry) {
+fun LogItemRow(log: LogEntry) {
     val levelColor = when (log.level) {
         LogLevel.ERROR -> CyberDanger
         LogLevel.WARN -> CyberWarning
@@ -314,71 +371,63 @@ private fun LogItemRow(log: LogEntry) {
         LogLevel.DEBUG -> CyberTextMuted
     }
 
-    val rowBg = when (log.level) {
-        LogLevel.ERROR -> CyberDanger.copy(alpha = 0.08f)
-        LogLevel.WARN -> CyberWarning.copy(alpha = 0.05f)
-        else -> Color.Transparent
+    val timeFormatted = remember(log.timestamp) {
+        java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(log.timestamp))
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(rowBg, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 3.dp)
+            .padding(vertical = 2.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top
+            verticalAlignment = Alignment.Top,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = log.formattedTime,
+                text = timeFormatted,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
                 color = CyberTextMuted,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(top = 1.dp)
+                modifier = Modifier.width(76.dp)
             )
 
-            Spacer(modifier = Modifier.width(6.dp))
-
             Text(
-                text = "[${log.level.name.take(3)}]",
-                color = levelColor,
+                text = "[${log.level.name.take(4)}]",
                 fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(top = 1.dp)
+                color = levelColor,
+                modifier = Modifier.width(46.dp)
             )
 
-            Spacer(modifier = Modifier.width(6.dp))
-
             Text(
-                text = "${log.tag}: ",
-                color = CyberTextSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.Monospace
+                text = "[${log.tag.take(14)}]",
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = CyberPrimary,
+                modifier = Modifier.width(96.dp)
             )
 
             Text(
                 text = log.message,
-                color = when (log.level) {
-                    LogLevel.ERROR -> CyberDanger
-                    LogLevel.WARN -> CyberWarning
-                    else -> CyberTextPrimary
-                },
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = CyberTextPrimary,
+                lineHeight = 13.sp,
+                modifier = Modifier.weight(1f)
             )
         }
 
         if (log.throwableStackTrace != null) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = log.throwableStackTrace,
-                color = CyberDanger.copy(alpha = 0.8f),
-                fontSize = 10.sp,
+                text = log.throwableStackTrace.take(400),
+                fontSize = 9.sp,
                 fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 16.dp)
+                color = CyberDanger.copy(alpha = 0.8f),
+                lineHeight = 12.sp,
+                modifier = Modifier.padding(start = 122.dp)
             )
         }
     }

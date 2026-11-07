@@ -35,6 +35,11 @@ sealed class AppError(
         override val cause: Throwable? = null
     ) : AppError(message, cause)
 
+    data class Validation(
+        override val message: String,
+        override val cause: Throwable? = null
+    ) : AppError(message, cause)
+
     data class Unknown(
         override val message: String = "An unexpected error occurred",
         override val cause: Throwable? = null

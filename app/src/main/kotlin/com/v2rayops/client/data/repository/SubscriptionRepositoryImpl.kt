@@ -112,6 +112,53 @@ class SubscriptionRepositoryImpl @Inject constructor(
         AppLogger.i("SubscriptionRepository", "Selected active config: ${config.displayName}")
     }
 
+    override fun importManualConfig(rawUri: String): AppResult<VpnConfig> {
+        val trimmed = rawUri.trim()
+        if (trimmed.isBlank()) {
+            return AppResult.Failure(AppError.Validation("Configuration link cannot be empty"))
+        }
+        val parsed = profileParser.parseUri(trimmed)
+            ?: return AppResult.Failure(AppError.Validation("Invalid V2Ray link. Must start with vless://, vmess://, trojan://, or ss://"))
+
+        val newId = System.currentTimeMillis()
+        val remarkName = parsed.remark.ifBlank { "Imported ${parsed.protocol.uppercase()}" }
+        val newConfig = VpnConfig(
+            id = newId,
+            protocol = parsed.protocol,
+            configUri = trimmed,
+            serverId = 0L,
+            status = "active",
+            configName = remarkName,
+            remark = remarkName,
+            host = parsed.host,
+            port = parsed.port,
+            expiresAt = null,
+            serverName = "Custom (${parsed.host})",
+            serverCountry = "SG",
+            serverFlag = "⚡"
+        )
+
+        val current = _configs.value.toMutableList()
+        current.add(0, newConfig)
+        _configs.value = current
+        _selectedConfig.value = newConfig
+        secureStore.saveSelectedConfigId(newId)
+        saveConfigsToCache(current)
+        AppLogger.i("SubscriptionRepository", "Successfully imported manual config: ${newConfig.displayName} (${newConfig.displayEndpoint})")
+        return AppResult.Success(newConfig)
+    }
+
+    override fun deleteConfig(configId: Long) {
+        val current = _configs.value.filter { it.id != configId }
+        _configs.value = current
+        if (_selectedConfig.value?.id == configId) {
+            _selectedConfig.value = current.firstOrNull()
+            _selectedConfig.value?.let { secureStore.saveSelectedConfigId(it.id) }
+        }
+        saveConfigsToCache(current)
+        AppLogger.i("SubscriptionRepository", "Deleted config #$configId")
+    }
+
     override suspend fun syncConfigs(customerCode: String): AppResult<List<VpnConfig>> =
         withContext(dispatchers.io) {
             try {

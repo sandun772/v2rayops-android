@@ -21,7 +21,7 @@ class XrayConfigGenerator @Inject constructor(
 
         // 1. Log configuration
         val log = JSONObject().apply {
-            put("loglevel", "warning")
+            put("loglevel", "debug")
         }
         root.put("log", log)
 
@@ -30,13 +30,15 @@ class XrayConfigGenerator @Inject constructor(
             val servers = JSONArray().apply {
                 put(settings.customDns.ifBlank { "1.1.1.1" })
                 put("8.8.8.8")
-                put("https://dns.google/dns-query")
+                put("tcp://1.1.1.1")
             }
             put("servers", servers)
             put("queryStrategy", "UseIPv4")
             val hosts = JSONObject().apply {
                 put("sg-v2rayops.vpnxhub.com", "172.236.134.215")
                 put("v2rayops.vpnxhub.com", "172.236.134.215")
+                put("dns.google", "8.8.8.8")
+                put("one.one.one.one", "1.1.1.1")
             }
             put("hosts", hosts)
         }
@@ -105,27 +107,55 @@ class XrayConfigGenerator @Inject constructor(
             put("protocol", config.protocol.lowercase())
 
             val settingsObj = JSONObject()
-            if (config.isVless && parsed != null) {
+            if (parsed != null) {
                 val outboundAddress = if (parsed.host.contains("vpnxhub.com", ignoreCase = true)) {
                     "172.236.134.215"
                 } else {
                     parsed.host
                 }
-                val vnext = JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("address", outboundAddress)
-                        put("port", parsed.port)
-                        val users = JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("id", parsed.uuidOrPassword)
-                                put("encryption", "none")
-                                if (parsed.flow.isNotBlank()) put("flow", parsed.flow)
-                            })
-                        }
-                        put("users", users)
-                    })
+
+                if (config.isVless) {
+                    val vnext = JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("address", outboundAddress)
+                            put("port", parsed.port)
+                            val users = JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("id", parsed.uuidOrPassword)
+                                    put("encryption", "none")
+                                    if (parsed.flow.isNotBlank()) put("flow", parsed.flow)
+                                })
+                            }
+                            put("users", users)
+                        })
+                    }
+                    settingsObj.put("vnext", vnext)
+                } else if (config.isTrojan) {
+                    val servers = JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("address", outboundAddress)
+                            put("port", parsed.port)
+                            put("password", parsed.uuidOrPassword)
+                        })
+                    }
+                    settingsObj.put("servers", servers)
+                } else if (config.isVmess) {
+                    val vnext = JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("address", outboundAddress)
+                            put("port", parsed.port)
+                            val users = JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("id", parsed.uuidOrPassword)
+                                    put("alterId", 0)
+                                    put("security", "auto")
+                                })
+                            }
+                            put("users", users)
+                        })
+                    }
+                    settingsObj.put("vnext", vnext)
                 }
-                settingsObj.put("vnext", vnext)
             }
             // Enable XUDP packet encoding for high-speed UDP tunneling over WebSocket streams (critical for DNS & QUIC)
             settingsObj.put("packetEncoding", "xudp")
@@ -141,24 +171,17 @@ class XrayConfigGenerator @Inject constructor(
 
                     if (parsed.security == "reality") {
                         val realitySettings = JSONObject().apply {
-                            put("serverName", parsed.sni)
+                            put("serverName", parsed.sni.ifBlank { parsed.host })
                             put("publicKey", parsed.publicKey)
                             put("shortId", parsed.shortId)
                             put("fingerprint", "chrome")
                         }
                         put("realitySettings", realitySettings)
                     } else if (parsed.security == "tls") {
-                        val certName = if (parsed.host.contains("vpnxhub.com", ignoreCase = true)) {
-                            parsed.host
-                        } else if (parsed.sni.contains("vpnxhub.com", ignoreCase = true)) {
-                            parsed.sni
-                        } else {
-                            parsed.host
-                        }
-
                         val tlsSettings = JSONObject().apply {
+                            // NetMod-grade bug host handling: always allow insecure so carrier bug host SNIs never fail
+                            put("allowInsecure", true)
                             put("serverName", parsed.sni.ifBlank { parsed.host })
-                            put("verifyPeerCertByName", certName)
                             put("fingerprint", "chrome")
                             if (parsed.networkType.equals("ws", ignoreCase = true)) {
                                 put("alpn", JSONArray().apply {

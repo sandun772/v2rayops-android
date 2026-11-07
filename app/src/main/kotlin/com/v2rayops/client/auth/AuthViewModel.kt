@@ -40,6 +40,10 @@ class AuthViewModel @Inject constructor(
         }
     }
 
+    fun loginDevOfflineMode() {
+        _uiState.value = AuthUiState.Success("267968")
+    }
+
     fun resetError() {
         if (_uiState.value is AuthUiState.Error) {
             _uiState.value = AuthUiState.Idle

@@ -23,6 +23,9 @@ import androidx.compose.ui.unit.sp
 import com.v2rayops.client.designsystem.components.CyberCard
 import com.v2rayops.client.designsystem.components.StatusBadge
 import com.v2rayops.client.designsystem.components.StatusIndicatorType
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material3.IconButton
+import com.v2rayops.client.designsystem.theme.CyberDanger
 import com.v2rayops.client.designsystem.theme.CyberAccent
 import com.v2rayops.client.designsystem.theme.CyberBorder
 import com.v2rayops.client.designsystem.theme.CyberCard
@@ -35,6 +38,7 @@ fun ServerListItem(
     config: VpnConfig,
     isSelected: Boolean,
     onSelect: () -> Unit,
+    onDelete: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     CyberCard(
@@ -97,6 +101,21 @@ fun ServerListItem(
                 text = if (isSelected) "SELECTED" else config.serverCountry.ifBlank { "ACTIVE" },
                 status = if (isSelected) StatusIndicatorType.CONNECTED else StatusIndicatorType.DISCONNECTED
             )
+
+            if (onDelete != null) {
+                Spacer(modifier = Modifier.width(4.dp))
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "Delete config",
+                        tint = CyberTextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
     }
 }
