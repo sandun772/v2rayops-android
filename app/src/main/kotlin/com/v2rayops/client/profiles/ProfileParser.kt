@@ -22,6 +22,7 @@ data class ParsedProfile(
     val wsHost: String = "",
     val publicKey: String = "",
     val shortId: String = "",
+    val allowInsecure: Boolean = false,
     val rawUri: String
 )
 
@@ -60,6 +61,9 @@ class ProfileParser @Inject constructor() {
         val wsHost = queryParams["host"]?.let { safeDecode(it) } ?: host
         val pbk = queryParams["pbk"] ?: ""
         val sid = queryParams["sid"] ?: ""
+        val allowInsecure = queryParams["allowInsecure"] == "true" ||
+                queryParams["allowInsecure"] == "1" ||
+                queryParams["insecure"] == "1"
 
         return ParsedProfile(
             protocol = "vless",
@@ -75,6 +79,7 @@ class ProfileParser @Inject constructor() {
             wsHost = wsHost,
             publicKey = pbk,
             shortId = sid,
+            allowInsecure = allowInsecure,
             rawUri = rawUri
         )
     }
@@ -92,6 +97,9 @@ class ProfileParser @Inject constructor() {
         val type = queryParams["type"] ?: "tcp"
         val path = queryParams["path"]?.let { safeDecode(it) } ?: ""
         val wsHost = queryParams["host"]?.let { safeDecode(it) } ?: host
+        val allowInsecure = queryParams["allowInsecure"] == "true" ||
+                queryParams["allowInsecure"] == "1" ||
+                queryParams["insecure"] == "1"
 
         return ParsedProfile(
             protocol = "trojan",
@@ -104,6 +112,7 @@ class ProfileParser @Inject constructor() {
             networkType = type,
             wsPath = path,
             wsHost = wsHost,
+            allowInsecure = allowInsecure,
             rawUri = rawUri
         )
     }
@@ -122,6 +131,9 @@ class ProfileParser @Inject constructor() {
         val net = json.optString("net", "tcp")
         val path = json.optString("path", "")
         val wsHost = json.optString("host", host)
+        val allowInsecure = json.optBoolean("insecure", false) ||
+                json.optString("allowInsecure") == "true" ||
+                json.optString("insecure") == "1"
 
         if (host.isBlank() || uuid.isBlank()) return null
 
@@ -136,6 +148,7 @@ class ProfileParser @Inject constructor() {
             networkType = net,
             wsPath = path,
             wsHost = wsHost,
+            allowInsecure = allowInsecure,
             rawUri = rawUri
         )
     }

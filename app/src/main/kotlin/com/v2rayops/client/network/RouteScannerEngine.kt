@@ -89,6 +89,7 @@ class RouteScannerEngine @Inject constructor(
             "zoom.us" to SniCategory.ZOOM_TEAMS,
             "microsoft.com" to SniCategory.ZOOM_TEAMS,
             "teams.microsoft.com" to SniCategory.ZOOM_TEAMS,
+            "office.com" to SniCategory.ZOOM_TEAMS,
 
             // TikTok Packages
             "tiktok.com" to SniCategory.TIKTOK,
@@ -99,6 +100,10 @@ class RouteScannerEngine @Inject constructor(
             // WhatsApp & Social
             "web.whatsapp.com" to SniCategory.WHATSAPP_SOCIAL,
             "media.whatsapp.net" to SniCategory.WHATSAPP_SOCIAL,
+
+            // YouTube / Google
+            "googlevideo.com" to SniCategory.CUSTOM,
+            "youtube.com" to SniCategory.CUSTOM,
 
             // Cloudflare / Universal Edges
             "cloudflare.com" to SniCategory.CLOUDFLARE_EDGE,
@@ -118,14 +123,14 @@ class RouteScannerEngine @Inject constructor(
                     wsHost = DEFAULT_VPS_DOMAIN,
                     wsPath = "/v2rayops"
                 ),
-                // 2. Addr SNI Strategy (Fronting): Connect to domain as address, send VPS domain in TLS SNI & Host
+                // 2. Addr SNI Strategy (Fronting): URI address is bug host domain, dials VPS cluster with zero-rated SNI
                 SniRouteCandidate(
                     domain = domain,
                     strategy = RouteStrategy.ADDR_SNI,
                     category = cat,
-                    targetHost = domain,
+                    targetHost = DEFAULT_VPS_IP,
                     targetPort = 443,
-                    sni = DEFAULT_VPS_DOMAIN,
+                    sni = domain,
                     wsHost = DEFAULT_VPS_DOMAIN,
                     wsPath = "/v2rayops"
                 )
@@ -143,14 +148,13 @@ class RouteScannerEngine @Inject constructor(
         val wsHost = candidate.wsHost
         val wsPath = candidate.wsPath
 
-        var rawSocket: Socket? = null
         val startTcp = System.currentTimeMillis()
 
         // 1. TCP Socket Connect (Resolves domain via system DNS if targetHost is domain)
-        try {
+        val rawSocket: Socket = try {
             val s = Socket()
             s.connect(InetSocketAddress(targetHost, port), timeoutMs)
-            rawSocket = s
+            s
         } catch (e: Exception) {
             val elapsed = System.currentTimeMillis() - startTcp
             return@withContext candidate.copy(
@@ -162,8 +166,7 @@ class RouteScannerEngine @Inject constructor(
 
         // 2. TLS Handshake Probe with SNI
         val startTls = System.currentTimeMillis()
-        var sslSocket: SSLSocket? = null
-        try {
+        val sslSocket: SSLSocket = try {
             val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
                 override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
@@ -179,9 +182,9 @@ class RouteScannerEngine @Inject constructor(
             ssl.soTimeout = timeoutMs
 
             ssl.startHandshake()
-            sslSocket = ssl
+            ssl
         } catch (e: Exception) {
-            rawSocket?.close()
+            try { rawSocket.close() } catch (_: Exception) {}
             val elapsed = System.currentTimeMillis() - startTls
             return@withContext candidate.copy(
                 status = SniStatus.BLOCKED_TIMEOUT,
@@ -199,7 +202,9 @@ class RouteScannerEngine @Inject constructor(
             val writer = OutputStreamWriter(sslSocket.outputStream, "UTF-8")
             val reader = BufferedReader(InputStreamReader(sslSocket.inputStream, "UTF-8"))
 
-            val wsKey = Base64.getEncoder().encodeToString("V2RayOpsProbeKey123".toByteArray())
+            val nonce = ByteArray(16)
+            SecureRandom().nextBytes(nonce)
+            val wsKey = Base64.getEncoder().encodeToString(nonce)
             val request = "GET $wsPath HTTP/1.1\r\n" +
                     "Host: $wsHost\r\n" +
                     "Upgrade: websocket\r\n" +
@@ -221,7 +226,7 @@ class RouteScannerEngine @Inject constructor(
         } finally {
             try {
                 sslSocket.close()
-                rawSocket?.close()
+                rawSocket.close()
             } catch (_: Exception) {}
         }
 
@@ -290,9 +295,11 @@ class RouteScannerEngine @Inject constructor(
             // Destination address becomes candidate.domain (e.g. support.zoom.us:443)
             // SNI becomes VPS domain (sg-v2rayops.vpnxhub.com)
             // Host becomes VPS domain (sg-v2rayops.vpnxhub.com)
+            // allowInsecure is enabled for zero-rated certificate fronting
             updatedUri = replaceAddressAndPort(updatedUri, candidate.domain, candidate.targetPort)
-            updatedUri = replaceQueryParam(updatedUri, "sni", candidate.sni)
+            updatedUri = replaceQueryParam(updatedUri, "sni", candidate.wsHost)
             updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+            updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
         } else {
             // Strategy 1 (Standard SNI):
             // Destination address is VPS IP / domain
@@ -301,6 +308,7 @@ class RouteScannerEngine @Inject constructor(
             updatedUri = replaceAddressAndPort(updatedUri, DEFAULT_VPS_DOMAIN, 443)
             updatedUri = replaceQueryParam(updatedUri, "sni", candidate.domain)
             updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+            updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
         }
 
         val parsed = profileParser.parseUri(updatedUri)

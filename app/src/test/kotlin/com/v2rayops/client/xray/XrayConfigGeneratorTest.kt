@@ -100,10 +100,49 @@ class XrayConfigGeneratorTest {
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getString("host"))
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
         val tlsSettings = stream.getJSONObject("tlsSettings")
-        assertFalse(tlsSettings.has("allowInsecure"))
+        assertTrue(tlsSettings.getBoolean("allowInsecure"))
         assertTrue(tlsSettings.getString("verifyPeerCertByName").contains("sg-v2rayops.vpnxhub.com"))
         assertEquals("tiktok.com", tlsSettings.getString("serverName"))
         assertEquals("xudp", proxy.getJSONObject("settings").getString("packetEncoding"))
         assertTrue(json.getJSONObject("dns").has("hosts"))
+    }
+
+    @Test
+    fun generateJson_withAddrFrontingVless_routesToClusterWithBugHostSni() {
+        val addrFrontingConfig = VpnConfig(
+            id = 142,
+            protocol = "vless",
+            configUri = "vless://866b7211-8ff7-4c07-9713-eac6857486f0@support.zoom.us:443?encryption=none&security=tls&sni=sg-v2rayops.vpnxhub.com&allowInsecure=true&alpn=http/1.1,h2,h3&fp=chrome&type=ws&host=sg-v2rayops.vpnxhub.com&path=/v2rayops&packetEncoding=xudp#kaveen%20Manahara",
+            serverId = 11,
+            status = "active",
+            configName = "Dialog-Zoom-Fronting"
+        )
+        val settings = UserSettings()
+        val jsonString = generator.generateJson(addrFrontingConfig, settings)
+        val json = JSONObject(jsonString)
+
+        val proxy = json.getJSONArray("outbounds").getJSONObject(0)
+        val vnext = proxy.getJSONObject("settings").getJSONArray("vnext").getJSONObject(0)
+
+        // Socket must route to our VPS cluster IP
+        assertEquals("172.236.134.215", vnext.getString("address"))
+        assertEquals(443, vnext.getInt("port"))
+
+        val stream = proxy.getJSONObject("streamSettings")
+        val tlsSettings = stream.getJSONObject("tlsSettings")
+
+        // SNI must be the zero-rated bug host (support.zoom.us)
+        assertEquals("support.zoom.us", tlsSettings.getString("serverName"))
+        assertTrue(tlsSettings.getBoolean("allowInsecure"))
+
+        // WebSocket Host header must be our VPS domain
+        val wsSettings = stream.getJSONObject("wsSettings")
+        assertEquals("/v2rayops", wsSettings.getString("path"))
+        assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getString("host"))
+        assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
+
+        // DNS hosts mapping must pre-resolve support.zoom.us to avoid DNS timeouts
+        val dnsHosts = json.getJSONObject("dns").getJSONObject("hosts")
+        assertEquals("172.236.134.215", dnsHosts.getString("support.zoom.us"))
     }
 }

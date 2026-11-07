@@ -25,6 +25,29 @@ class XrayConfigGenerator @Inject constructor(
         }
         root.put("log", log)
 
+        val parsed = profileParser.parseUri(config.configUri)
+
+        val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
+        val isVpsHost = { h: String ->
+            h.contains("vpnxhub.com", ignoreCase = true) || h == "172.236.134.215"
+        }
+
+        // Determine if this is an "Addr-as-SNI" (Fronting) config:
+        // URI address is a bug host (support.zoom.us, tiktok.com, etc.), while wsHost/sni is our VPS cluster
+        val isAddrSniFronting = parsed != null &&
+                !isVpsHost(parsed.host) &&
+                (isVpsHost(parsed.wsHost) || isVpsHost(parsed.sni))
+
+        val outboundAddress = if (parsed != null) {
+            if (isAddrSniFronting || isVpsHost(parsed.host)) {
+                "172.236.134.215"
+            } else {
+                parsed.host
+            }
+        } else {
+            "172.236.134.215"
+        }
+
         // 2. DNS
         val dns = JSONObject().apply {
             val servers = JSONArray().apply {
@@ -40,6 +63,9 @@ class XrayConfigGenerator @Inject constructor(
                 put("v2rayops.vpnxhub.com", "172.236.134.215")
                 put("dns.google", "8.8.8.8")
                 put("one.one.one.one", "1.1.1.1")
+                if (parsed != null && parsed.host.isNotBlank() && !isIp(parsed.host)) {
+                    put(parsed.host, outboundAddress)
+                }
             }
             put("hosts", hosts)
         }
@@ -102,7 +128,6 @@ class XrayConfigGenerator @Inject constructor(
 
         // 4. Outbounds (Proxy Outbound + Direct + Block)
         val outbounds = JSONArray()
-        val parsed = profileParser.parseUri(config.configUri)
 
         val proxyOutbound = JSONObject().apply {
             put("tag", "proxy")
@@ -110,12 +135,6 @@ class XrayConfigGenerator @Inject constructor(
 
             val settingsObj = JSONObject()
             if (parsed != null) {
-                val outboundAddress = if (parsed.host.contains("vpnxhub.com", ignoreCase = true)) {
-                    "172.236.134.215"
-                } else {
-                    parsed.host
-                }
-
                 if (config.isVless) {
                     val vnext = JSONArray().apply {
                         put(JSONObject().apply {
@@ -165,6 +184,18 @@ class XrayConfigGenerator @Inject constructor(
 
             // StreamSettings (Reality / TLS / WebSocket)
             if (parsed != null) {
+                val effectiveSni = if (isAddrSniFronting) {
+                    parsed.host // In Addr-Fronting, bug host from address is sent as zero-rated SNI
+                } else {
+                    parsed.sni.ifBlank { parsed.host }
+                }
+
+                val effectiveWsHost = if (isAddrSniFronting) {
+                    if (isVpsHost(parsed.wsHost)) parsed.wsHost else if (isVpsHost(parsed.sni)) parsed.sni else "sg-v2rayops.vpnxhub.com"
+                } else {
+                    parsed.wsHost.ifBlank { parsed.host }
+                }
+
                 val streamSettings = JSONObject().apply {
                     put("network", parsed.networkType.ifBlank { "tcp" })
                     if (parsed.security.isNotBlank() && parsed.security != "none") {
@@ -173,25 +204,23 @@ class XrayConfigGenerator @Inject constructor(
 
                     if (parsed.security == "reality") {
                         val realitySettings = JSONObject().apply {
-                            put("serverName", parsed.sni.ifBlank { parsed.host })
+                            put("serverName", effectiveSni)
                             put("publicKey", parsed.publicKey)
                             put("shortId", parsed.shortId)
                             put("fingerprint", "chrome")
                         }
                         put("realitySettings", realitySettings)
                     } else if (parsed.security == "tls") {
-                        val sniHost = parsed.sni.ifBlank { parsed.host }
                         val candidateDomains = linkedSetOf<String>()
-                        val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
 
                         val addDomainWithWildcards: (String) -> Unit = { raw ->
                             if (raw.isNotBlank() && !isIp(raw)) {
                                 candidateDomains.add(raw)
                                 val parts = raw.split(".")
                                 if (parts.size >= 2) {
-                                    val root = parts.takeLast(2).joinToString(".")
-                                    candidateDomains.add(root)
-                                    candidateDomains.add("*.$root")
+                                    val rootDomain = parts.takeLast(2).joinToString(".")
+                                    candidateDomains.add(rootDomain)
+                                    candidateDomains.add("*.$rootDomain")
                                     if (parts.size >= 3) {
                                         val parent = parts.drop(1).joinToString(".")
                                         candidateDomains.add(parent)
@@ -201,9 +230,9 @@ class XrayConfigGenerator @Inject constructor(
                             }
                         }
 
-                        addDomainWithWildcards(parsed.wsHost)
+                        addDomainWithWildcards(effectiveWsHost)
                         addDomainWithWildcards(parsed.host)
-                        addDomainWithWildcards(sniHost)
+                        addDomainWithWildcards(effectiveSni)
 
                         // Cluster origin & CDN fallback cert identities
                         candidateDomains.add("sg-v2rayops.vpnxhub.com")
@@ -212,7 +241,10 @@ class XrayConfigGenerator @Inject constructor(
                         candidateDomains.add("*.vpnxhub.com")
 
                         val tlsSettings = JSONObject().apply {
-                            put("serverName", sniHost)
+                            put("serverName", effectiveSni)
+                            if (parsed.allowInsecure || isAddrSniFronting || effectiveSni != outboundAddress) {
+                                put("allowInsecure", true)
+                            }
                             if (candidateDomains.isNotEmpty()) {
                                 put("verifyPeerCertByName", candidateDomains.joinToString(","))
                             }
@@ -230,10 +262,9 @@ class XrayConfigGenerator @Inject constructor(
                     if (parsed.networkType.equals("ws", ignoreCase = true)) {
                         val wsSettings = JSONObject().apply {
                             put("path", parsed.wsPath.ifBlank { "/v2rayops" })
-                            val hostHeader = parsed.wsHost.ifBlank { parsed.host }
-                            put("host", hostHeader)
+                            put("host", effectiveWsHost)
                             val headers = JSONObject().apply {
-                                put("Host", hostHeader)
+                                put("Host", effectiveWsHost)
                             }
                             put("headers", headers)
                         }

@@ -75,5 +75,22 @@ class ProfileParserTest {
         assertEquals(vcnManual, vcnAuto)
         org.junit.Assert.assertTrue(vcnAuto.contains("*.vpnxhub.com"))
         org.junit.Assert.assertTrue(vcnAuto.contains("vpnxhub.com"))
+        org.junit.Assert.assertTrue(pManual?.allowInsecure == true)
+    }
+
+    @Test
+    fun parseUri_withAddrFrontingConfig_parsesCorrectly() {
+        val uri = "vless://866b7211-8ff7-4c07-9713-eac6857486f0@support.zoom.us:443?encryption=none&security=tls&sni=sg-v2rayops.vpnxhub.com&allowInsecure=true&alpn=http/1.1,h2,h3&fp=chrome&type=ws&host=sg-v2rayops.vpnxhub.com&path=/v2rayops&packetEncoding=xudp#kaveen"
+        val profile = parser.parseUri(uri)
+
+        assertNotNull(profile)
+        assertEquals("vless", profile?.protocol)
+        assertEquals("support.zoom.us", profile?.host)
+        assertEquals(443, profile?.port)
+        assertEquals("866b7211-8ff7-4c07-9713-eac6857486f0", profile?.uuidOrPassword)
+        assertEquals("sg-v2rayops.vpnxhub.com", profile?.sni)
+        assertEquals("sg-v2rayops.vpnxhub.com", profile?.wsHost)
+        assertEquals("/v2rayops", profile?.wsPath)
+        assertEquals(true, profile?.allowInsecure)
     }
 }
