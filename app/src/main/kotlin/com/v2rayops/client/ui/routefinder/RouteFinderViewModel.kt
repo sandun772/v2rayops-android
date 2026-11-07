@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.core.result.AppResult
 import com.v2rayops.client.network.RouteScannerEngine
+import com.v2rayops.client.network.RouteStrategy
 import com.v2rayops.client.network.SniCategory
 import com.v2rayops.client.network.SniRouteCandidate
 import com.v2rayops.client.network.SniStatus
@@ -35,8 +36,11 @@ class RouteFinderViewModel @Inject constructor(
     private val _activeCategory = MutableStateFlow<SniCategory?>(null)
     val activeCategory: StateFlow<SniCategory?> = _activeCategory.asStateFlow()
 
-    private val _appliedSni = MutableStateFlow<String?>(null)
-    val appliedSni: StateFlow<String?> = _appliedSni.asStateFlow()
+    private val _activeStrategy = MutableStateFlow<RouteStrategy?>(null)
+    val activeStrategy: StateFlow<RouteStrategy?> = _activeStrategy.asStateFlow()
+
+    private val _appliedRouteKey = MutableStateFlow<String?>(null)
+    val appliedRouteKey: StateFlow<String?> = _appliedRouteKey.asStateFlow()
 
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
@@ -59,13 +63,15 @@ class RouteFinderViewModel @Inject constructor(
                 val results = routeScannerEngine.scanAll(currentList) { scanned, total, latest ->
                     _scannedCount.value = scanned
                     _totalCount.value = total
-                    val updated = _candidates.value.map { if (it.sni == latest.sni) latest else it }
+                    val updated = _candidates.value.map {
+                        if (it.domain == latest.domain && it.strategy == latest.strategy) latest else it
+                    }
                     _candidates.value = updated
                 }
                 _candidates.value = results
                 val best = results.firstOrNull { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
                 if (best != null) {
-                    _statusMessage.value = "Fastest Route Found: ${best.sni} (${best.latencyMs}ms)"
+                    _statusMessage.value = "Fastest Route: [${best.strategy.shortTag}] ${best.domain} (${best.latencyMs}ms)"
                 }
             } catch (e: Exception) {
                 AppLogger.e("RouteFinderVM", "Error running route scan: ${e.message}")
@@ -79,8 +85,8 @@ class RouteFinderViewModel @Inject constructor(
         viewModelScope.launch {
             when (val res = routeScannerEngine.applySniRoute(candidate)) {
                 is AppResult.Success -> {
-                    _appliedSni.value = candidate.sni
-                    _statusMessage.value = "Applied SNI '${candidate.sni}' to active configuration"
+                    _appliedRouteKey.value = "${candidate.strategy.name}:${candidate.domain}"
+                    _statusMessage.value = "Applied [${candidate.strategy.shortTag}] '${candidate.domain}' to active configuration"
                 }
                 is AppResult.Failure -> {
                     _statusMessage.value = "Failed: ${res.error.message}"
@@ -90,35 +96,60 @@ class RouteFinderViewModel @Inject constructor(
         }
     }
 
-    fun addCustomSni(rawSni: String) {
-        val trimmed = rawSni.trim().lowercase()
-        if (trimmed.isBlank() || _candidates.value.any { it.sni.equals(trimmed, ignoreCase = true) }) return
+    fun addCustomHost(rawDomain: String, strategy: RouteStrategy) {
+        val trimmed = rawDomain.trim().lowercase()
+        if (trimmed.isBlank() || _candidates.value.any { it.domain.equals(trimmed, ignoreCase = true) && it.strategy == strategy }) return
 
-        val newCandidate = SniRouteCandidate(
-            sni = trimmed,
-            category = SniCategory.CUSTOM
-        )
+        val newCandidate = if (strategy == RouteStrategy.ADDR_SNI) {
+            SniRouteCandidate(
+                domain = trimmed,
+                strategy = RouteStrategy.ADDR_SNI,
+                category = SniCategory.CUSTOM,
+                targetHost = trimmed,
+                targetPort = 443,
+                sni = RouteScannerEngine.DEFAULT_VPS_DOMAIN,
+                wsHost = RouteScannerEngine.DEFAULT_VPS_DOMAIN,
+                wsPath = "/v2rayops"
+            )
+        } else {
+            SniRouteCandidate(
+                domain = trimmed,
+                strategy = RouteStrategy.STANDARD_SNI,
+                category = SniCategory.CUSTOM,
+                targetHost = RouteScannerEngine.DEFAULT_VPS_IP,
+                targetPort = 443,
+                sni = trimmed,
+                wsHost = RouteScannerEngine.DEFAULT_VPS_DOMAIN,
+                wsPath = "/v2rayops"
+            )
+        }
+
         val updated = listOf(newCandidate) + _candidates.value
         _candidates.value = updated
         _totalCount.value = updated.size
 
         viewModelScope.launch {
             val scanned = routeScannerEngine.scanCandidate(newCandidate)
-            _candidates.value = _candidates.value.map { if (it.sni == scanned.sni) scanned else it }
-                .sortedWith(
-                    compareBy<SniRouteCandidate> {
-                        when (it.status) {
-                            SniStatus.WS_READY -> 0
-                            SniStatus.TLS_OK -> 1
-                            SniStatus.BLOCKED_TIMEOUT -> 2
-                            SniStatus.TCP_FAILED -> 3
-                        }
-                    }.thenBy { it.latencyMs }
-                )
+            _candidates.value = _candidates.value.map {
+                if (it.domain == scanned.domain && it.strategy == scanned.strategy) scanned else it
+            }.sortedWith(
+                compareBy<SniRouteCandidate> {
+                    when (it.status) {
+                        SniStatus.WS_READY -> 0
+                        SniStatus.TLS_OK -> 1
+                        SniStatus.BLOCKED_TIMEOUT -> 2
+                        SniStatus.TCP_FAILED -> 3
+                    }
+                }.thenBy { it.latencyMs }
+            )
         }
     }
 
     fun setCategory(category: SniCategory?) {
         _activeCategory.value = category
+    }
+
+    fun setStrategy(strategy: RouteStrategy?) {
+        _activeStrategy.value = strategy
     }
 }

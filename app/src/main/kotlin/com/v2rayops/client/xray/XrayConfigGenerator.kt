@@ -28,6 +28,7 @@ class XrayConfigGenerator @Inject constructor(
         // 2. DNS
         val dns = JSONObject().apply {
             val servers = JSONArray().apply {
+                put("localhost")
                 put(settings.customDns.ifBlank { "1.1.1.1" })
                 put("8.8.8.8")
                 put("tcp://1.1.1.1")

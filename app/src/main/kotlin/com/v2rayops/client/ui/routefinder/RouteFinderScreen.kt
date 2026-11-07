@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AltRoute
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
@@ -75,6 +76,7 @@ import com.v2rayops.client.designsystem.theme.CyberTextMuted
 import com.v2rayops.client.designsystem.theme.CyberTextPrimary
 import com.v2rayops.client.designsystem.theme.CyberTextSecondary
 import com.v2rayops.client.designsystem.theme.CyberWarning
+import com.v2rayops.client.network.RouteStrategy
 import com.v2rayops.client.network.SniCategory
 import com.v2rayops.client.network.SniRouteCandidate
 import com.v2rayops.client.network.SniStatus
@@ -89,14 +91,18 @@ fun RouteFinderScreen(
     val scannedCount by viewModel.scannedCount.collectAsState()
     val totalCount by viewModel.totalCount.collectAsState()
     val activeCategory by viewModel.activeCategory.collectAsState()
-    val appliedSni by viewModel.appliedSni.collectAsState()
+    val activeStrategy by viewModel.activeStrategy.collectAsState()
+    val appliedRouteKey by viewModel.appliedRouteKey.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
 
-    val filteredCandidates = remember(candidates, activeCategory) {
-        if (activeCategory == null) candidates
-        else candidates.filter { it.category == activeCategory }
+    val filteredCandidates = remember(candidates, activeCategory, activeStrategy) {
+        candidates.filter { candidate ->
+            val matchCategory = activeCategory == null || candidate.category == activeCategory
+            val matchStrategy = activeStrategy == null || candidate.strategy == activeStrategy
+            matchCategory && matchStrategy
+        }
     }
 
     val readyCount = candidates.count { it.status == SniStatus.WS_READY }
@@ -125,7 +131,7 @@ fun RouteFinderScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
-                            contentDescription = "Add Custom SNI",
+                            contentDescription = "Add Custom Route",
                             tint = CyberAccent
                         )
                     }
@@ -142,16 +148,43 @@ fun RouteFinderScreen(
                 }
             )
 
+            // Strategy Filter Pills: [ ALL MODES | STANDARD SNI | ADDR SNI (FRONTING) ]
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterPill(
+                    label = "ALL MODES",
+                    isSelected = activeStrategy == null,
+                    onClick = { viewModel.setStrategy(null) },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterPill(
+                    label = "STANDARD SNI",
+                    isSelected = activeStrategy == RouteStrategy.STANDARD_SNI,
+                    onClick = { viewModel.setStrategy(RouteStrategy.STANDARD_SNI) },
+                    modifier = Modifier.weight(1f)
+                )
+                FilterPill(
+                    label = "ADDR FRONTING",
+                    isSelected = activeStrategy == RouteStrategy.ADDR_SNI,
+                    onClick = { viewModel.setStrategy(RouteStrategy.ADDR_SNI) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
             // Category Filter Pills
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 CategoryPill(
-                    label = "ALL",
+                    label = "ALL PACKAGES",
                     isSelected = activeCategory == null,
                     onClick = { viewModel.setCategory(null) }
                 )
@@ -169,7 +202,7 @@ fun RouteFinderScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
-                padding = 14.dp,
+                padding = 12.dp,
                 backgroundColor = CyberCardElevated
             ) {
                 Column {
@@ -218,12 +251,12 @@ fun RouteFinderScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Metric Badges
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         MetricBadge(
                             label = "WS 101 READY",
@@ -246,7 +279,7 @@ fun RouteFinderScreen(
                     }
 
                     if (statusMessage != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = statusMessage ?: "",
                             fontSize = 11.sp,
@@ -262,13 +295,14 @@ fun RouteFinderScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(filteredCandidates, key = { it.sni }) { candidate ->
+                items(filteredCandidates, key = { "${it.strategy.name}:${it.domain}" }) { candidate ->
+                    val isApplied = appliedRouteKey == "${candidate.strategy.name}:${candidate.domain}"
                     RouteCandidateCard(
                         candidate = candidate,
-                        isApplied = appliedSni == candidate.sni,
+                        isApplied = isApplied,
                         onApply = { viewModel.applyCandidate(candidate) }
                     )
                 }
@@ -294,9 +328,7 @@ fun RouteFinderScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = CyberPrimary
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(
@@ -307,8 +339,8 @@ fun RouteFinderScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "APPLY FASTEST ROUTE (${bestRoute.sni} • ${bestRoute.latencyMs}ms)",
-                        fontSize = 12.sp,
+                        text = "APPLY FASTEST [${bestRoute.strategy.shortTag}] ${bestRoute.domain} (${bestRoute.latencyMs}ms)",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
                         color = Color.White
@@ -317,16 +349,46 @@ fun RouteFinderScreen(
             }
         }
 
-        // Add Custom SNI Dialog
+        // Add Custom Bug Host Dialog
         if (showAddDialog) {
-            AddCustomSniDialog(
+            AddCustomHostDialog(
                 onDismiss = { showAddDialog = false },
-                onAdd = { rawSni ->
-                    viewModel.addCustomSni(rawSni)
+                onAdd = { rawDomain, strategy ->
+                    viewModel.addCustomHost(rawDomain, strategy)
                     showAddDialog = false
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun FilterPill(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isSelected) CyberPrimary else CyberCard)
+            .border(
+                width = 1.dp,
+                color = if (isSelected) CyberAccent else CyberBorder,
+                shape = RoundedCornerShape(6.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = if (isSelected) Color.White else CyberTextSecondary
+        )
     }
 }
 
@@ -339,22 +401,22 @@ private fun CategoryPill(
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(if (isSelected) CyberPrimary else CyberCard)
+            .background(if (isSelected) CyberCardElevated else CyberCard)
             .border(
                 width = 1.dp,
-                color = if (isSelected) CyberAccent else CyberBorder,
+                color = if (isSelected) CyberAccent else CyberBorderSubtle,
                 shape = RoundedCornerShape(6.dp)
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
             fontFamily = FontFamily.Monospace,
-            color = if (isSelected) Color.White else CyberTextSecondary
+            color = if (isSelected) CyberAccent else CyberTextSecondary
         )
     }
 }
@@ -371,20 +433,20 @@ private fun MetricBadge(
             .clip(RoundedCornerShape(6.dp))
             .background(CyberBackground)
             .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-            .padding(vertical = 6.dp, horizontal = 8.dp),
+            .padding(vertical = 6.dp, horizontal = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = count.toString(),
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
                 color = color
             )
             Text(
                 text = label,
-                fontSize = 8.sp,
+                fontSize = 7.sp,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Monospace,
                 color = CyberTextMuted
@@ -413,6 +475,8 @@ private fun RouteCandidateCard(
         SniStatus.TCP_FAILED -> "PORT CLOSED"
     }
 
+    val isAddrSni = candidate.strategy == RouteStrategy.ADDR_SNI
+
     CyberCard(
         modifier = Modifier.fillMaxWidth(),
         padding = 12.dp,
@@ -423,7 +487,6 @@ private fun RouteCandidateCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: SNI Domain & details
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -432,9 +495,9 @@ private fun RouteCandidateCard(
                             .clip(CircleShape)
                             .background(statusColor)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = candidate.sni,
+                        text = candidate.domain,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -448,18 +511,20 @@ private fun RouteCandidateCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Category Badge
+                    // Strategy Badge
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(3.dp))
-                            .background(CyberCardElevated)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .background(if (isAddrSni) CyberAccent.copy(alpha = 0.2f) else CyberPrimary.copy(alpha = 0.2f))
+                            .border(1.dp, if (isAddrSni) CyberAccent else CyberPrimary, RoundedCornerShape(3.dp))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = candidate.category.displayName.uppercase(),
+                            text = if (isAddrSni) "ADDR FRONTING" else "STANDARD SNI",
                             fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            color = CyberTextSecondary
+                            color = if (isAddrSni) CyberAccent else Color.White
                         )
                     }
 
@@ -468,7 +533,7 @@ private fun RouteCandidateCard(
                         modifier = Modifier
                             .clip(RoundedCornerShape(3.dp))
                             .background(statusColor.copy(alpha = 0.15f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = statusText,
@@ -490,16 +555,22 @@ private fun RouteCandidateCard(
                     }
                 }
 
-                if (candidate.errorDetail.isNotBlank() && candidate.status != SniStatus.WS_READY) {
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = candidate.errorDetail,
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = CyberTextMuted,
-                        maxLines = 1
-                    )
+                Spacer(modifier = Modifier.height(3.dp))
+
+                // Detail showing address vs SNI routing
+                val routeDetail = if (isAddrSni) {
+                    "Addr: ${candidate.domain}:443 • SNI: ${candidate.sni}"
+                } else {
+                    "Addr: ${candidate.targetHost}:443 • SNI: ${candidate.sni}"
                 }
+
+                Text(
+                    text = routeDetail,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = CyberTextMuted,
+                    maxLines = 1
+                )
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -558,18 +629,19 @@ private fun RouteCandidateCard(
 }
 
 @Composable
-private fun AddCustomSniDialog(
+private fun AddCustomHostDialog(
     onDismiss: () -> Unit,
-    onAdd: (String) -> Unit
+    onAdd: (domain: String, strategy: RouteStrategy) -> Unit
 ) {
     var rawInput by remember { mutableStateOf("") }
+    var selectedStrategy by remember { mutableStateOf(RouteStrategy.ADDR_SNI) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = CyberCardElevated,
         title = {
             Text(
-                text = "ADD CUSTOM SNI BUG HOST",
+                text = "ADD CUSTOM BUG HOST ROUTE",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
@@ -579,17 +651,50 @@ private fun AddCustomSniDialog(
         text = {
             Column {
                 Text(
-                    text = "Enter a zero-rated domain/bug host permitted on your carrier package (e.g. support.zoom.us, teams.microsoft.com, tiktok.com):",
+                    text = "Select routing strategy mode:",
                     fontSize = 11.sp,
                     color = CyberTextSecondary
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterPill(
+                        label = "ADDR FRONTING",
+                        isSelected = selectedStrategy == RouteStrategy.ADDR_SNI,
+                        onClick = { selectedStrategy = RouteStrategy.ADDR_SNI },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterPill(
+                        label = "STANDARD SNI",
+                        isSelected = selectedStrategy == RouteStrategy.STANDARD_SNI,
+                        onClick = { selectedStrategy = RouteStrategy.STANDARD_SNI },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = if (selectedStrategy == RouteStrategy.ADDR_SNI) {
+                        "Domain will be used as the TCP connection Address with VPS SNI fronting."
+                    } else {
+                        "Domain will be injected into TLS SNI with direct VPS address."
+                    },
+                    fontSize = 10.sp,
+                    color = CyberTextMuted
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 OutlinedTextField(
                     value = rawInput,
                     onValueChange = { rawInput = it },
                     placeholder = {
                         Text(
-                            text = "e.g. portal.zoom.us",
+                            text = "e.g. support.zoom.us",
                             fontSize = 11.sp,
                             color = CyberTextMuted,
                             fontFamily = FontFamily.Monospace
@@ -611,7 +716,7 @@ private fun AddCustomSniDialog(
             Button(
                 onClick = {
                     if (rawInput.isNotBlank()) {
-                        onAdd(rawInput)
+                        onAdd(rawInput, selectedStrategy)
                     }
                 },
                 enabled = rawInput.isNotBlank(),

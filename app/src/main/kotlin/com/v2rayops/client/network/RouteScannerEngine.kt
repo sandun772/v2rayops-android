@@ -31,12 +31,17 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
+enum class RouteStrategy(val displayName: String, val shortTag: String) {
+    STANDARD_SNI("Standard SNI Bug Host", "SNI"),
+    ADDR_SNI("Addr SNI (Fronting)", "ADDR")
+}
+
 enum class SniCategory(val displayName: String) {
     ZOOM_TEAMS("Zoom & Teams"),
     TIKTOK("TikTok"),
     WHATSAPP_SOCIAL("WhatsApp & Social"),
     CLOUDFLARE_EDGE("Cloudflare Edge"),
-    CUSTOM("Custom SNI")
+    CUSTOM("Custom")
 }
 
 enum class SniStatus {
@@ -47,10 +52,12 @@ enum class SniStatus {
 }
 
 data class SniRouteCandidate(
-    val sni: String,
+    val domain: String,                       // Bug host domain (e.g. support.zoom.us)
+    val strategy: RouteStrategy,              // STANDARD_SNI or ADDR_SNI
     val category: SniCategory,
-    val targetHost: String = "172.236.134.215",
+    val targetHost: String,                   // Connect IP/host (for STANDARD_SNI: VPS IP; for ADDR_SNI: domain)
     val targetPort: Int = 443,
+    val sni: String,                          // TLS SNI header (for STANDARD_SNI: domain; for ADDR_SNI: sg-v2rayops.vpnxhub.com)
     val wsHost: String = "sg-v2rayops.vpnxhub.com",
     val wsPath: String = "/v2rayops",
     val status: SniStatus = SniStatus.TCP_FAILED,
@@ -60,8 +67,8 @@ data class SniRouteCandidate(
 
 /**
  * Route Scanner Engine:
- * Benchmarks carrier bug host SNIs and frontend CDN routes to discover the fastest,
- * zero-timeout tunneling path for the client's current mobile carrier or Wi-Fi ISP.
+ * Benchmarks carrier bug host SNIs and fronting Addr-SNI routes to discover the fastest,
+ * zero-timeout tunneling path for the client's current mobile carrier (Dialog, Mobitel, etc.) or Wi-Fi.
  */
 @Singleton
 class RouteScannerEngine @Inject constructor(
@@ -72,36 +79,65 @@ class RouteScannerEngine @Inject constructor(
 ) {
     companion object {
         private const val TAG = "RouteScanner"
+        const val DEFAULT_VPS_IP = "172.236.134.215"
+        const val DEFAULT_VPS_DOMAIN = "sg-v2rayops.vpnxhub.com"
 
-        val DEFAULT_CANDIDATES = listOf(
+        private val RAW_BUG_DOMAINS = listOf(
             // Zoom / Education / Work & Learn
-            SniRouteCandidate(sni = "support.zoom.us", category = SniCategory.ZOOM_TEAMS),
-            SniRouteCandidate(sni = "news.zoom.us", category = SniCategory.ZOOM_TEAMS),
-            SniRouteCandidate(sni = "zoom.us", category = SniCategory.ZOOM_TEAMS),
-            SniRouteCandidate(sni = "microsoft.com", category = SniCategory.ZOOM_TEAMS),
-            SniRouteCandidate(sni = "teams.microsoft.com", category = SniCategory.ZOOM_TEAMS),
+            "support.zoom.us" to SniCategory.ZOOM_TEAMS,
+            "news.zoom.us" to SniCategory.ZOOM_TEAMS,
+            "zoom.us" to SniCategory.ZOOM_TEAMS,
+            "microsoft.com" to SniCategory.ZOOM_TEAMS,
+            "teams.microsoft.com" to SniCategory.ZOOM_TEAMS,
 
             // TikTok Packages
-            SniRouteCandidate(sni = "tiktok.com", category = SniCategory.TIKTOK),
-            SniRouteCandidate(sni = "p16-va.tiktokcdn.com", category = SniCategory.TIKTOK),
-            SniRouteCandidate(sni = "v16m.tiktokcdn.com", category = SniCategory.TIKTOK),
-            SniRouteCandidate(sni = "api.tiktokv.com", category = SniCategory.TIKTOK),
+            "tiktok.com" to SniCategory.TIKTOK,
+            "p16-va.tiktokcdn.com" to SniCategory.TIKTOK,
+            "v16m.tiktokcdn.com" to SniCategory.TIKTOK,
+            "api.tiktokv.com" to SniCategory.TIKTOK,
 
             // WhatsApp & Social
-            SniRouteCandidate(sni = "web.whatsapp.com", category = SniCategory.WHATSAPP_SOCIAL),
-            SniRouteCandidate(sni = "media.whatsapp.net", category = SniCategory.WHATSAPP_SOCIAL),
+            "web.whatsapp.com" to SniCategory.WHATSAPP_SOCIAL,
+            "media.whatsapp.net" to SniCategory.WHATSAPP_SOCIAL,
 
-            // Universal CDN Edges
-            SniRouteCandidate(sni = "cloudflare.com", category = SniCategory.CLOUDFLARE_EDGE),
-            SniRouteCandidate(sni = "one.one.one.one", category = SniCategory.CLOUDFLARE_EDGE)
+            // Cloudflare / Universal Edges
+            "cloudflare.com" to SniCategory.CLOUDFLARE_EDGE,
+            "one.one.one.one" to SniCategory.CLOUDFLARE_EDGE
         )
+
+        val DEFAULT_CANDIDATES: List<SniRouteCandidate> = RAW_BUG_DOMAINS.flatMap { (domain, cat) ->
+            listOf(
+                // 1. Standard SNI Strategy: Connect to VPS, send domain in TLS SNI
+                SniRouteCandidate(
+                    domain = domain,
+                    strategy = RouteStrategy.STANDARD_SNI,
+                    category = cat,
+                    targetHost = DEFAULT_VPS_IP,
+                    targetPort = 443,
+                    sni = domain,
+                    wsHost = DEFAULT_VPS_DOMAIN,
+                    wsPath = "/v2rayops"
+                ),
+                // 2. Addr SNI Strategy (Fronting): Connect to domain as address, send VPS domain in TLS SNI & Host
+                SniRouteCandidate(
+                    domain = domain,
+                    strategy = RouteStrategy.ADDR_SNI,
+                    category = cat,
+                    targetHost = domain,
+                    targetPort = 443,
+                    sni = DEFAULT_VPS_DOMAIN,
+                    wsHost = DEFAULT_VPS_DOMAIN,
+                    wsPath = "/v2rayops"
+                )
+            )
+        }
     }
 
     suspend fun scanCandidate(
         candidate: SniRouteCandidate,
         timeoutMs: Int = 3000
     ): SniRouteCandidate = withContext(dispatchers.io) {
-        val targetIp = candidate.targetHost
+        val targetHost = candidate.targetHost
         val port = candidate.targetPort
         val sni = candidate.sni
         val wsHost = candidate.wsHost
@@ -110,10 +146,10 @@ class RouteScannerEngine @Inject constructor(
         var rawSocket: Socket? = null
         val startTcp = System.currentTimeMillis()
 
-        // 1. TCP Socket Connect
+        // 1. TCP Socket Connect (Resolves domain via system DNS if targetHost is domain)
         try {
             val s = Socket()
-            s.connect(InetSocketAddress(targetIp, port), timeoutMs)
+            s.connect(InetSocketAddress(targetHost, port), timeoutMs)
             rawSocket = s
         } catch (e: Exception) {
             val elapsed = System.currentTimeMillis() - startTcp
@@ -136,7 +172,7 @@ class RouteScannerEngine @Inject constructor(
             val sslContext = SSLContext.getInstance("TLS")
             sslContext.init(null, trustAll, SecureRandom())
 
-            val ssl = sslContext.socketFactory.createSocket(rawSocket, targetIp, port, true) as SSLSocket
+            val ssl = sslContext.socketFactory.createSocket(rawSocket, targetHost, port, true) as SSLSocket
             val sslParams = SSLParameters()
             sslParams.serverNames = listOf(SNIHostName(sni))
             ssl.sslParameters = sslParams
@@ -240,32 +276,62 @@ class RouteScannerEngine @Inject constructor(
     }
 
     /**
-     * Applies the selected SNI to the active V2Ray configuration.
-     * Rewrites query parameters and reloads the tunnel.
+     * Applies the selected candidate to the active V2Ray configuration.
+     * Rewrites destination address, SNI, and WS Host parameters and cleanly reloads the tunnel.
      */
     suspend fun applySniRoute(candidate: SniRouteCandidate): AppResult<VpnConfig> = withContext(dispatchers.io) {
         val current = subscriptionRepository.observeSelectedConfig().first()
             ?: return@withContext AppResult.Failure(com.v2rayops.client.core.error.AppError.Validation("No active config selected to tune"))
 
-        val updatedUri = replaceQueryParam(current.configUri, "sni", candidate.sni)
+        var updatedUri = current.configUri
+
+        if (candidate.strategy == RouteStrategy.ADDR_SNI) {
+            // Strategy 2 (Addr SNI Fronting):
+            // Destination address becomes candidate.domain (e.g. support.zoom.us:443)
+            // SNI becomes VPS domain (sg-v2rayops.vpnxhub.com)
+            // Host becomes VPS domain (sg-v2rayops.vpnxhub.com)
+            updatedUri = replaceAddressAndPort(updatedUri, candidate.domain, candidate.targetPort)
+            updatedUri = replaceQueryParam(updatedUri, "sni", candidate.sni)
+            updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+        } else {
+            // Strategy 1 (Standard SNI):
+            // Destination address is VPS IP / domain
+            // SNI becomes candidate.domain
+            // Host remains VPS domain
+            updatedUri = replaceAddressAndPort(updatedUri, DEFAULT_VPS_DOMAIN, 443)
+            updatedUri = replaceQueryParam(updatedUri, "sni", candidate.domain)
+            updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+        }
+
         val parsed = profileParser.parseUri(updatedUri)
             ?: return@withContext AppResult.Failure(com.v2rayops.client.core.error.AppError.Validation("Failed to re-parse updated config URI"))
 
+        val strategyTag = candidate.strategy.shortTag
+        val cleanName = current.displayName.substringBefore(" [")
         val updatedConfig = current.copy(
             configUri = updatedUri,
-            remark = "${current.displayName.substringBefore(" [")} [SNI: ${candidate.sni}]"
+            remark = "$cleanName [$strategyTag: ${candidate.domain}]"
         )
 
-        AppLogger.i(TAG, "Applied winning SNI '${candidate.sni}' to config #${updatedConfig.id}")
+        AppLogger.i(TAG, "Applied winning route [${candidate.strategy.name}] '${candidate.domain}' to config #${updatedConfig.id} (Addr: ${parsed.host}, SNI: ${parsed.sni})")
         subscriptionRepository.selectConfig(updatedConfig)
 
-        // If currently running, cleanly reconnect with the winning SNI
+        // If currently running, cleanly reconnect with the newly tuned route
         if (vpnManager.connectionState.value.isConnected) {
-            AppLogger.i(TAG, "Reconnecting tunnel with newly tuned SNI route: ${candidate.sni}")
+            AppLogger.i(TAG, "Reconnecting tunnel with newly tuned route (${candidate.strategy.shortTag}: ${candidate.domain})")
             vpnManager.connect(updatedConfig)
         }
 
         AppResult.Success(updatedConfig)
+    }
+
+    private fun replaceAddressAndPort(rawUri: String, newHost: String, newPort: Int): String {
+        val regex = Regex("""@([^:/?#]+)(:[0-9]+)?""")
+        return if (regex.containsMatchIn(rawUri)) {
+            rawUri.replace(regex, "@$newHost:$newPort")
+        } else {
+            rawUri
+        }
     }
 
     private fun replaceQueryParam(rawUri: String, key: String, newValue: String): String {
