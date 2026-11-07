@@ -30,9 +30,15 @@ class XrayConfigGenerator @Inject constructor(
             val servers = JSONArray().apply {
                 put(settings.customDns.ifBlank { "1.1.1.1" })
                 put("8.8.8.8")
+                put("https://dns.google/dns-query")
             }
             put("servers", servers)
             put("queryStrategy", "UseIPv4")
+            val hosts = JSONObject().apply {
+                put("sg-v2rayops.vpnxhub.com", "172.236.134.215")
+                put("v2rayops.vpnxhub.com", "172.236.134.215")
+            }
+            put("hosts", hosts)
         }
         root.put("dns", dns)
 
@@ -115,6 +121,8 @@ class XrayConfigGenerator @Inject constructor(
                 }
                 settingsObj.put("vnext", vnext)
             }
+            // Enable XUDP packet encoding for high-speed UDP tunneling over WebSocket streams (critical for DNS & QUIC)
+            settingsObj.put("packetEncoding", "xudp")
             put("settings", settingsObj)
 
             // StreamSettings (Reality / TLS / WebSocket)

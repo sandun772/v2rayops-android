@@ -65,9 +65,9 @@ class ConnectionDiagnosticsManager @Inject constructor(
 
         // 2. Build OkHttpClient (proxied through local core if connected, direct if disconnected)
         val clientBuilder = OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
-            .writeTimeout(5, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
 
         if (isVpnConnected) {
             clientBuilder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", LOCAL_PROXY_PORT)))

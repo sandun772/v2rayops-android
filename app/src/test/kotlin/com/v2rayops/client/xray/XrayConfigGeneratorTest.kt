@@ -97,5 +97,7 @@ class XrayConfigGeneratorTest {
         assertFalse(tlsSettings.has("allowInsecure"))
         assertEquals("tiktok.com", tlsSettings.getString("serverName"))
         assertEquals("sg-v2rayops.vpnxhub.com", tlsSettings.getString("verifyPeerCertByName"))
+        assertEquals("xudp", proxy.getJSONObject("settings").getString("packetEncoding"))
+        assertTrue(json.getJSONObject("dns").has("hosts"))
     }
 }
