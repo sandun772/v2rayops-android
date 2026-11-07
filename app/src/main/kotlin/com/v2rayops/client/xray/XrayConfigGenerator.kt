@@ -178,10 +178,25 @@ class XrayConfigGenerator @Inject constructor(
                         }
                         put("realitySettings", realitySettings)
                     } else if (parsed.security == "tls") {
+                        val sniHost = parsed.sni.ifBlank { parsed.host }
+                        val candidateDomains = linkedSetOf<String>()
+                        val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
+
+                        if (parsed.wsHost.isNotBlank() && !isIp(parsed.wsHost)) {
+                            candidateDomains.add(parsed.wsHost)
+                        }
+                        if (parsed.host.isNotBlank() && !isIp(parsed.host)) {
+                            candidateDomains.add(parsed.host)
+                        }
+                        if (sniHost.isNotBlank() && !isIp(sniHost)) {
+                            candidateDomains.add(sniHost)
+                        }
+
                         val tlsSettings = JSONObject().apply {
-                            // NetMod-grade bug host handling: always allow insecure so carrier bug host SNIs never fail
-                            put("allowInsecure", true)
-                            put("serverName", parsed.sni.ifBlank { parsed.host })
+                            put("serverName", sniHost)
+                            if (candidateDomains.isNotEmpty()) {
+                                put("verifyPeerCertByName", candidateDomains.joinToString(","))
+                            }
                             put("fingerprint", "chrome")
                             if (parsed.networkType.equals("ws", ignoreCase = true)) {
                                 put("alpn", JSONArray().apply {
