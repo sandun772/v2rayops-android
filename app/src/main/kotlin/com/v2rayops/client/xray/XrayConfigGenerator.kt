@@ -239,11 +239,43 @@ class XrayConfigGenerator @Inject constructor(
                         }
                         put("wsSettings", wsSettings)
                     }
+
+                    // DPI Evasion & Anti-Jitter Socket Options
+                    val sockopt = JSONObject().apply {
+                        put("tcpNoDelay", true)
+                        put("tcpKeepAliveInterval", 15)
+                        if (settings.dpiDelayFixEnabled) {
+                            put("dialerProxy", "fragment")
+                        }
+                    }
+                    put("sockopt", sockopt)
                 }
                 put("streamSettings", streamSettings)
             }
         }
         outbounds.put(proxyOutbound)
+
+        // DPI Evasion & Jitter Fix Outbound (TLS Packet Fragmentation)
+        if (settings.dpiDelayFixEnabled) {
+            outbounds.put(JSONObject().apply {
+                put("tag", "fragment")
+                put("protocol", "freedom")
+                put("settings", JSONObject().apply {
+                    put("domainStrategy", "AsIs")
+                    put("fragment", JSONObject().apply {
+                        put("packets", "1-3")
+                        put("length", "100-200")
+                        put("interval", "10-20")
+                    })
+                })
+                put("streamSettings", JSONObject().apply {
+                    put("sockopt", JSONObject().apply {
+                        put("tcpNoDelay", true)
+                        put("tcpKeepAliveInterval", 15)
+                    })
+                })
+            })
+        }
 
         // Direct Outbound
         outbounds.put(JSONObject().apply {

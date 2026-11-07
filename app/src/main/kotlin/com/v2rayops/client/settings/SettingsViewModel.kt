@@ -64,6 +64,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun toggleDpiDelayFix(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setDpiDelayFixEnabled(enabled)
+        }
+    }
+
     fun logout(onSuccess: () -> Unit) {
         viewModelScope.launch {
             authRepository.logout()

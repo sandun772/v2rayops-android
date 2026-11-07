@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -204,6 +206,9 @@ fun NetworkOptimizerScreen(
                         Spacer(modifier = Modifier.height(14.dp))
 
                         LatencyMetricsCard(rep)
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        DpiJitterInspectionCard(rep)
                         Spacer(modifier = Modifier.height(14.dp))
 
                         DnsRaceCard(rep)
@@ -1203,6 +1208,118 @@ private fun RecommendedTuningCard(report: NetworkOptimizationReport) {
                     label = "Smart Adaptive QoS Engine",
                     value = "ENABLED",
                     detail = "Dynamic token-bucket rate smoothing"
+                )
+                HorizontalDivider(color = CyberBorderSubtle, thickness = 1.dp)
+
+                TuningRow(
+                    label = "Anti-DPI Packet Fragmentation",
+                    value = "ENABLED (100-200B / 10-20ms)",
+                    detail = "Splits TLS ClientHello across frames to defeat DPI middlebox stalls"
+                )
+                HorizontalDivider(color = CyberBorderSubtle, thickness = 1.dp)
+
+                TuningRow(
+                    label = "TCP NoDelay (Nagle Bypass)",
+                    value = "ENABLED",
+                    detail = "Disables delayed-ACK buffering to eliminate carrier jitter"
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DpiJitterInspectionCard(report: NetworkOptimizationReport) {
+    val dpiColor = if (report.isDpiDetected) CyberWarning else CyberSuccess
+
+    CyberCard(
+        backgroundColor = CyberCard,
+        borderColor = if (report.isDpiDetected) CyberWarning.copy(alpha = 0.5f) else CyberBorderSubtle,
+        padding = 16.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = "DPI Audit",
+                        tint = CyberAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "DPI DELAY & JITTER AUDIT",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(dpiColor.copy(alpha = 0.15f))
+                        .border(1.dp, dpiColor, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (report.isDpiDetected) "DPI ACTIVE" else "DPI BYPASSED",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = dpiColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = if (report.isDpiDetected) {
+                    "Carrier middlebox is intercepting initial TLS ClientHello packets, introducing +${report.dpiInspectionDelayMs}ms handshake stall. TLS packet fragmentation and TCP NoDelay bypass DPI inspection."
+                } else {
+                    "Minimal middlebox inspection delay observed (+${report.dpiInspectionDelayMs}ms). Packets pass with low carrier jitter."
+                },
+                fontSize = 11.sp,
+                color = CyberTextSecondary,
+                lineHeight = 16.sp
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricItem(
+                    label = "DPI STALL",
+                    value = "+${report.dpiInspectionDelayMs}ms",
+                    color = if (report.dpiInspectionDelayMs < 60) CyberSuccess else CyberWarning,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricItem(
+                    label = "JITTER",
+                    value = "±${report.jitterMs}ms",
+                    color = if (report.jitterMs < 40) CyberSuccess else CyberDanger,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricItem(
+                    label = "ANTI-DPI TLS",
+                    value = "100-200B",
+                    color = CyberAccent,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricItem(
+                    label = "TCP NODELAY",
+                    value = "ACTIVE",
+                    color = CyberSuccess,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }

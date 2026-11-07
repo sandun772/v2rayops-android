@@ -58,4 +58,8 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun setTcpBufferSizeKb(sizeKb: Int) {
         preferencesDataStore.setTcpBufferSizeKb(sizeKb)
     }
+
+    override suspend fun setDpiDelayFixEnabled(enabled: Boolean) {
+        preferencesDataStore.setDpiDelayFixEnabled(enabled)
+    }
 }

@@ -183,6 +183,20 @@ fun SettingsScreen(
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
 
+                    SettingToggleItem(
+                        icon = Icons.Default.Shield,
+                        title = "Anti-DPI Delay & Carrier Jitter Fix",
+                        description = "Splits TLS ClientHello into micro-fragments (100-200B) and bypasses Nagle delay to defeat carrier DPI stalls",
+                        checked = settings.dpiDelayFixEnabled,
+                        onCheckedChange = { viewModel.toggleDpiDelayFix(it) }
+                    )
+
+                    HorizontalDivider(
+                        color = CyberBorder,
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
                     // Download Speed Headroom Selector
                     Row(
                         modifier = Modifier.fillMaxWidth(),

@@ -18,5 +18,6 @@ data class UserSettings(
     val smartQoSEnabled: Boolean = true,
     val downloadSpeedLimitMbps: Int = 0,
     val cellularMtuOptimized: Boolean = true,
-    val tcpBufferSizeKb: Int = 32
+    val tcpBufferSizeKb: Int = 32,
+    val dpiDelayFixEnabled: Boolean = true
 )

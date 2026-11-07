@@ -17,4 +17,5 @@ interface SettingsRepository {
     suspend fun setDownloadSpeedLimitMbps(limitMbps: Int)
     suspend fun setCellularMtuOptimized(optimized: Boolean)
     suspend fun setTcpBufferSizeKb(sizeKb: Int)
+    suspend fun setDpiDelayFixEnabled(enabled: Boolean)
 }
