@@ -21,7 +21,7 @@ android {
             useSupportLibrary = true
         }
 
-        buildConfigField("String", "DEFAULT_BASE_URL", "\"https://v2rayops.vpnxhub.com/\"")
+        buildConfigField("String", "DEFAULT_BASE_URL", "\"https://v2rayops.vpnxhub.com:2083/\"")
     }
 
     buildTypes {

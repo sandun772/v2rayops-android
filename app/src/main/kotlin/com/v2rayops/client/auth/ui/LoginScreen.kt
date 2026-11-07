@@ -203,7 +203,7 @@ fun LoginScreen(
             // Web Sign In / Registration Button (opens website OAuth flow)
             CyberButton(
                 onClick = {
-                    val webUrl = "https://v2rayops.vpnxhub.com/sign-in?from=/auth/mobile-callback"
+                    val webUrl = "https://v2rayops.vpnxhub.com:2083/sign-in?from=/auth/mobile-callback"
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl))
                     context.startActivity(intent)
                 },
