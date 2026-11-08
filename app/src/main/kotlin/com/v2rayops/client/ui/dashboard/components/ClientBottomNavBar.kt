@@ -349,23 +349,6 @@ private fun MinimalConnectCenterItem(
             letterSpacing = 0.5.sp,
             color = labelColor
         )
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        // Vibrant 3dp indicator dot (Emerald green when connected, amber when connecting)
-        Box(
-            modifier = Modifier
-                .size(3.dp)
-                .clip(CircleShape)
-                .background(
-                    when {
-                        isConnected -> Color(0xFF22C55E)
-                        isConnecting -> Color(0xFFF59E0B)
-                        isSelected -> Color(0xFF818CF8)
-                        else -> Color.Transparent
-                    }
-                )
-        )
     }
 }
 
