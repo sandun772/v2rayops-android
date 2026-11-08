@@ -44,9 +44,9 @@ fun StatusPill(
             "CONNECTED"
         )
         else -> Quadruple(
-            Color(0xFF0C1322),
-            Color(0xFF19253F),
-            Color(0xFF38BDF8),
+            Color(0xFF0F1524),
+            Color(0xFF1E283D),
+            Color(0xFF6B7A99),
             "DISCONNECTED"
         )
     }
