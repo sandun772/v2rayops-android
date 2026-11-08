@@ -11,9 +11,11 @@ import com.v2rayops.client.domain.model.TrialInfo
 import com.v2rayops.client.domain.model.UserProfile
 import com.v2rayops.client.domain.model.UserSubscription
 import com.v2rayops.client.domain.repository.AuthRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,7 +27,13 @@ class AuthRepositoryImpl @Inject constructor(
     private val dispatchers: AppDispatchers
 ) : AuthRepository {
 
-    private val _isAuthenticated = MutableStateFlow(!secureStore.getCustomerCode().isNullOrBlank())
+    private val _isAuthenticated = MutableStateFlow(false)
+
+    init {
+        CoroutineScope(dispatchers.io).launch {
+            _isAuthenticated.value = !secureStore.getCustomerCode().isNullOrBlank()
+        }
+    }
 
     override fun getSavedCustomerCode(): String? = secureStore.getCustomerCode()
 

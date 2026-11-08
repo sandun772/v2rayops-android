@@ -10,9 +10,11 @@ import com.v2rayops.client.data.storage.SecureCredentialStore
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.profiles.ProfileParser
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -31,7 +33,9 @@ class SubscriptionRepositoryImpl @Inject constructor(
     private val _selectedConfig = MutableStateFlow<VpnConfig?>(null)
 
     init {
-        loadCachedConfigs()
+        CoroutineScope(dispatchers.io).launch {
+            loadCachedConfigs()
+        }
     }
 
     private fun loadCachedConfigs() {

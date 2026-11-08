@@ -142,11 +142,7 @@ fun SplashScreen(
                         translationX = logoTranslationX
                     }
                     .clip(RoundedCornerShape(22.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(CyberCard, CyberCardElevated)
-                        )
-                    )
+                    .background(CyberCard)
                     .border(
                         border = BorderStroke(
                             width = 1.5.dp,

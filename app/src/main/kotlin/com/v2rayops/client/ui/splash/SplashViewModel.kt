@@ -6,7 +6,7 @@ import com.v2rayops.client.domain.repository.AuthRepository
 import com.v2rayops.client.domain.repository.ServerRepository
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,12 +34,9 @@ class SplashViewModel @Inject constructor(
     }
 
     private fun checkAuthentication() {
-        viewModelScope.launch {
-            // Snappy splash presentation: quick logo-to-left slide, text reveal, and end glow
-            delay(1000)
-
+        viewModelScope.launch(Dispatchers.IO) {
             val code = authRepository.getSavedCustomerCode() ?: "267968"
-            // Dev & Offline mode: automatically set customer code and proceed straight to Dashboard
+            // Dev & Offline mode: automatically sync servers & configs in background
             launch {
                 try {
                     serverRepository.refreshServers()

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Deep Cyber Black Window Background (0ms cold start) -->
+    <!-- Solid Cyber Black Canvas -->
     <item android:drawable="@color/cyber_black" />
 
-    <!-- Centered Logo Squircle Graphic -->
+    <!-- Centered Squircle Badge matching Compose Frame 0 pixel-for-pixel -->
     <item
         android:width="84dp"
         android:height="84dp"
         android:gravity="center"
-        android:drawable="@drawable/v2rayops_logo" />
+        android:drawable="@drawable/splash_squircle_badge" />
 </layer-list>
