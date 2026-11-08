@@ -17,6 +17,7 @@ class MainActivity : ComponentActivity() {
     private val deepLinkCode = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.Theme_V2RayOps)
         super.onCreate(savedInstanceState)
         handleIntent(intent)
 

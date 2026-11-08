@@ -35,8 +35,8 @@ class SplashViewModel @Inject constructor(
 
     private fun checkAuthentication() {
         viewModelScope.launch {
-            // Smooth minimum splash delay for branding presence
-            delay(800)
+            // Cinematic splash presentation duration allowing the logo squircle translation and RayOPS reveal animation
+            delay(1900)
 
             val code = authRepository.getSavedCustomerCode() ?: "267968"
             // Dev & Offline mode: automatically set customer code and proceed straight to Dashboard
