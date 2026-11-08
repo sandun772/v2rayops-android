@@ -53,8 +53,7 @@ import com.v2rayops.client.designsystem.components.ImportConfigDialog
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
 import com.v2rayops.client.ui.dashboard.components.ClientNavTab
-import com.v2rayops.client.ui.dashboard.components.deriveCountryCode
-import com.v2rayops.client.ui.dashboard.components.deriveSubtitle
+import com.v2rayops.client.ui.dashboard.components.deriveConfigPackageDetails
 
 @Composable
 fun ServerSelectionScreen(
@@ -343,8 +342,8 @@ private fun NodeCardItem(
     pingMs: Long,
     onClick: () -> Unit
 ) {
-    val countryCode = deriveCountryCode(config)
-    val subtitle = deriveSubtitle(config)
+    val meta = remember(config) { deriveConfigPackageDetails(config) }
+    val subtitle = "${meta.isp} • ${meta.limit}"
 
     val (pingText, pingColor) = when {
         pingMs <= 0L -> "timeout" to Color(0xFFF43F5E)
@@ -370,27 +369,26 @@ private fun NodeCardItem(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Squircle Country Code [JP]
+            // Package Icon Badge (instead of text SG/JP squircle)
             Box(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF12182B))
-                    .border(1.dp, Color(0xFF1A243D), RoundedCornerShape(10.dp)),
+                    .background(meta.iconTint.copy(alpha = 0.14f))
+                    .border(1.dp, meta.iconTint.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = countryCode,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF94A3B8)
+                Icon(
+                    imageVector = meta.icon,
+                    contentDescription = meta.isp,
+                    tint = meta.iconTint,
+                    modifier = Modifier.size(18.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Center details: Title + Protocol
+            // Center details: Title + ISP & Limit Subtitle
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -407,7 +405,8 @@ private fun NodeCardItem(
                     text = subtitle,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF64748B),
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF94A3B8),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
