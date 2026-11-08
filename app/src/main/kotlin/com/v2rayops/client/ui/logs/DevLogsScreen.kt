@@ -25,17 +25,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -96,10 +102,15 @@ fun DevLogsScreen(
     val allLogs by AppLogger.logsFlow.collectAsState()
     val isProbing by viewModel.isProbing.collectAsState()
     val lastProbeReport by viewModel.lastProbeReport.collectAsState()
+    val isUploadingReport by viewModel.isUploadingReport.collectAsState()
+    val uploadResult by viewModel.uploadResult.collectAsState()
+    val uploadError by viewModel.uploadError.collectAsState()
 
     var selectedFilter by remember { mutableStateOf(LogFilter.ALL) }
     var isCopied by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showUploadDialog by remember { mutableStateOf(false) }
+    var userNoteText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
     val filteredLogs = remember(allLogs, selectedFilter) {
@@ -166,6 +177,24 @@ fun DevLogsScreen(
                             )
                         }
                     }
+                    IconButton(
+                        onClick = { showUploadDialog = true },
+                        enabled = !isUploadingReport
+                    ) {
+                        if (isUploadingReport) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = CyberAccent
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = "Upload Dev Report to VPS",
+                                tint = CyberAccent
+                            )
+                        }
+                    }
                     IconButton(onClick = { AppLogger.clear() }) {
                         Icon(
                             imageVector = Icons.Default.DeleteSweep,
@@ -176,37 +205,192 @@ fun DevLogsScreen(
                 }
             )
 
-            // Header Action & Easy Copy Card
+            // Header Action & Upload Cards
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
-                // Easy Copy Button
-                Button(
-                    onClick = { copyLogsToClipboard() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isCopied) CyberSuccess else CyberPrimary
-                    )
+                // Action Buttons Row (Copy Logs + Upload Dev Report to VPS)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isCopied) Icons.Default.Check else Icons.Default.ContentCopy,
-                        contentDescription = "Copy",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isCopied) "COPIED TO CLIPBOARD ✓" else "COPY ALL LOGS (${allLogs.size} ENTRIES)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        letterSpacing = 0.5.sp,
-                        color = Color.White
-                    )
+                    // Copy Button
+                    Button(
+                        onClick = { copyLogsToClipboard() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCopied) CyberSuccess else CyberCardElevated
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CyberBorderSubtle)
+                    ) {
+                        Icon(
+                            imageVector = if (isCopied) Icons.Default.Check else Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            tint = if (isCopied) Color.White else CyberTextPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isCopied) "COPIED" else "COPY LOGS",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (isCopied) Color.White else CyberTextPrimary
+                        )
+                    }
+
+                    // Upload Dev Report to VPS Button
+                    Button(
+                        onClick = { showUploadDialog = true },
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyberPrimary
+                        ),
+                        enabled = !isUploadingReport
+                    ) {
+                        if (isUploadingReport) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(15.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "UPLOADING...",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = "Upload",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "UPLOAD TO VPS",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+
+                // Upload Result Banner (Success)
+                if (uploadResult != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CyberSuccess.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                            .border(1.dp, CyberSuccess.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = CyberSuccess,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "DEV REPORT UPLOADED TO VPS",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = CyberSuccess
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = uploadResult!!,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = CyberTextPrimary
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { viewModel.clearUploadFeedback() },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = CyberTextMuted,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Upload Error Banner
+                if (uploadError != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CyberDanger.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                            .border(1.dp, CyberDanger.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "UPLOAD FAILED",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberDanger
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = uploadError!!,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberTextPrimary
+                                )
+                            }
+                            IconButton(
+                                onClick = { viewModel.clearUploadFeedback() },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    tint = CyberTextMuted,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -357,6 +541,103 @@ fun DevLogsScreen(
             ImportConfigDialog(
                 onDismiss = { showImportDialog = false },
                 onImport = { viewModel.importConfig(it) }
+            )
+        }
+
+        if (showUploadDialog) {
+            AlertDialog(
+                onDismissRequest = { showUploadDialog = false },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            tint = CyberAccent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "UPLOAD REPORT TO VPS",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextPrimary
+                        )
+                    }
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = "Gathers active VPN session metrics, active ADDR & SNI parameters, socket probe latencies, QoS states, and in-app logs to help debug and optimize the app.",
+                            fontSize = 12.sp,
+                            color = CyberTextSecondary,
+                            lineHeight = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = userNoteText,
+                            onValueChange = { userNoteText = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = {
+                                Text(
+                                    "Optional debug note (e.g. TikTok images slow, carrier timeout)",
+                                    fontSize = 11.sp,
+                                    color = CyberTextMuted
+                                )
+                            },
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberAccent,
+                                unfocusedBorderColor = CyberBorderSubtle,
+                                cursorColor = CyberAccent
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            maxLines = 3
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val note = userNoteText.trim()
+                            showUploadDialog = false
+                            viewModel.uploadDevReport(note)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "UPLOAD NOW",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showUploadDialog = false }) {
+                        Text(
+                            text = "CANCEL",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextMuted
+                        )
+                    }
+                },
+                containerColor = CyberCardElevated,
+                shape = RoundedCornerShape(12.dp)
             )
         }
     }

@@ -1,5 +1,7 @@
 package com.v2rayops.client.data.api
 
+import com.v2rayops.client.data.api.dto.DevReportRequestDto
+import com.v2rayops.client.data.api.dto.DevReportResponseDto
 import com.v2rayops.client.data.api.dto.HeartbeatRequestDto
 import com.v2rayops.client.data.api.dto.HeartbeatResponseDto
 import com.v2rayops.client.data.api.dto.ProfileResponseDto
@@ -35,4 +37,9 @@ interface V2RayOpsClientApi {
 
     @GET("api/client/support")
     suspend fun getSupportContacts(): Response<SupportResponseDto>
+
+    @POST("api/client/dev-report")
+    suspend fun uploadDevReport(
+        @Body report: DevReportRequestDto
+    ): Response<DevReportResponseDto>
 }

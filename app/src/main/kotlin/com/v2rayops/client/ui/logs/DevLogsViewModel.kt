@@ -3,8 +3,10 @@ package com.v2rayops.client.ui.logs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2rayops.client.core.logger.AppLogger
+import com.v2rayops.client.core.result.AppResult
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.network.ConnectionDiagnosticsManager
+import com.v2rayops.client.network.DevReportManager
 import com.v2rayops.client.network.NodeProbeReport
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +19,8 @@ import javax.inject.Inject
 @HiltViewModel
 class DevLogsViewModel @Inject constructor(
     private val diagnosticsManager: ConnectionDiagnosticsManager,
-    private val subscriptionRepository: SubscriptionRepository
+    private val subscriptionRepository: SubscriptionRepository,
+    private val devReportManager: DevReportManager
 ) : ViewModel() {
 
     private val _isProbing = MutableStateFlow(false)
@@ -25,6 +28,15 @@ class DevLogsViewModel @Inject constructor(
 
     private val _lastProbeReport = MutableStateFlow<NodeProbeReport?>(null)
     val lastProbeReport: StateFlow<NodeProbeReport?> = _lastProbeReport.asStateFlow()
+
+    private val _isUploadingReport = MutableStateFlow(false)
+    val isUploadingReport: StateFlow<Boolean> = _isUploadingReport.asStateFlow()
+
+    private val _uploadResult = MutableStateFlow<String?>(null)
+    val uploadResult: StateFlow<String?> = _uploadResult.asStateFlow()
+
+    private val _uploadError = MutableStateFlow<String?>(null)
+    val uploadError: StateFlow<String?> = _uploadError.asStateFlow()
 
     fun runProbe() {
         viewModelScope.launch {
@@ -44,10 +56,37 @@ class DevLogsViewModel @Inject constructor(
         }
     }
 
+    fun uploadDevReport(userNote: String = "") {
+        if (_isUploadingReport.value) return
+        viewModelScope.launch {
+            _isUploadingReport.value = true
+            _uploadResult.value = null
+            _uploadError.value = null
+
+            when (val res = devReportManager.collectAndUploadReport(userNote)) {
+                is AppResult.Success -> {
+                    _uploadResult.value = "Dev report successfully uploaded to VPS!\nReport ID: ${res.data.reportId}"
+                    AppLogger.i("DevLogs", "Uploaded dev report: ${res.data.reportId}")
+                }
+                is AppResult.Failure -> {
+                    _uploadError.value = res.error.message
+                    AppLogger.e("DevLogs", "Dev report upload failed: ${res.error.message}")
+                }
+                is AppResult.Loading -> Unit
+            }
+            _isUploadingReport.value = false
+        }
+    }
+
+    fun clearUploadFeedback() {
+        _uploadResult.value = null
+        _uploadError.value = null
+    }
+
     fun importConfig(rawUri: String): String? {
         return when (val res = subscriptionRepository.importManualConfig(rawUri)) {
-            is com.v2rayops.client.core.result.AppResult.Success -> null
-            is com.v2rayops.client.core.result.AppResult.Failure -> res.error.message
+            is AppResult.Success -> null
+            is AppResult.Failure -> res.error.message
             else -> null
         }
     }
