@@ -4,54 +4,32 @@ import android.app.Activity
 import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.v2rayops.client.R
-import com.v2rayops.client.designsystem.components.CyberDotMatrixBackground
-import com.v2rayops.client.designsystem.theme.CyberAccent
-import com.v2rayops.client.designsystem.theme.CyberBorder
-import com.v2rayops.client.designsystem.theme.CyberPrimary
-import com.v2rayops.client.designsystem.theme.CyberTextMuted
-import com.v2rayops.client.designsystem.theme.CyberTextPrimary
 import com.v2rayops.client.network.DiagnosticStatus
-import com.v2rayops.client.ui.dashboard.components.ActiveConfigButton
-import com.v2rayops.client.ui.dashboard.components.GlassyPowerButton
-import com.v2rayops.client.ui.dashboard.components.TopStatsRibbon
+import com.v2rayops.client.ui.dashboard.components.ActiveProfileCard
+import com.v2rayops.client.ui.dashboard.components.ClientUsageWidget
+import com.v2rayops.client.ui.dashboard.components.CyberBottomNavBar
+import com.v2rayops.client.ui.dashboard.components.CyberConnectButtonArea
+import com.v2rayops.client.ui.dashboard.components.CyberTopBar
 
 @Composable
 fun DashboardScreen(
@@ -67,6 +45,7 @@ fun DashboardScreen(
     val trafficStats by viewModel.trafficStats.collectAsState()
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val configs by viewModel.configs.collectAsState()
+    val userProfile by viewModel.userProfile.collectAsState()
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
 
     val vpnPrepareLauncher = rememberLauncherForActivityResult(
@@ -86,92 +65,63 @@ fun DashboardScreen(
         }
     }
 
-    val isUnstable = diagnosticResult?.status == DiagnosticStatus.FAILED || ((diagnosticResult?.pingMs ?: 0L) > 300L)
-    val pingMs = diagnosticResult?.pingMs ?: 0L
+    val isConnected = connectionState.isConnected
+    // Only flag unstable if connected and latency is genuinely excessive (>450ms) or test outright failed
+    val isUnstable = isConnected && (diagnosticResult?.status == DiagnosticStatus.FAILED || ((diagnosticResult?.pingMs ?: 0L) > 450L))
+    val pingMs = if (isConnected) (diagnosticResult?.pingMs?.coerceAtLeast(0L) ?: 0L) else 0L
 
-    CyberDotMatrixBackground {
+    Scaffold(
+        topBar = {
+            CyberTopBar(
+                connectionState = connectionState,
+                onNavigateToSettings = onNavigateToSettings
+            )
+        },
+        bottomBar = {
+            CyberBottomNavBar(
+                connectionState = connectionState,
+                onNavigateToProfiles = onNavigateToServers,
+                onNavigateToHome = { /* Already on Home */ },
+                onNavigateToLogs = onNavigateToLogs
+            )
+        },
+        containerColor = Color(0xFF04060A) // 100% Solid Deep Cosmic Background
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // 1. Sleek Top Header (Brand Logo + Title + Settings Icon)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Image(
-                        painter = painterResource(id = R.drawable.v2rayops_logo_trimmed),
-                        contentDescription = "V2RayOps",
-                        modifier = Modifier.size(36.dp, 22.dp),
-                        contentScale = ContentScale.Fit
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Ray",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Black,
-                        color = CyberTextPrimary
-                    )
-                    Text(
-                        text = "OPS",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Black,
-                        color = CyberPrimary
-                    )
+            // 1. Active Profile Selector Card (01 // ACTIVE PROFILE)
+            ActiveProfileCard(
+                selectedConfig = selectedConfig,
+                configs = configs,
+                onSelectConfig = { config ->
+                    viewModel.selectConfig(config)
                 }
-
-                IconButton(
-                    onClick = onNavigateToSettings,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF0C101B))
-                        .border(1.dp, CyberBorder, CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Settings,
-                        contentDescription = "Settings",
-                        tint = CyberTextMuted,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
-            // 2. Top Little Metric Ribbon
-            TopStatsRibbon(
-                connectionState = connectionState,
-                trafficStats = trafficStats,
-                pingMs = pingMs
             )
 
-            // Flexible space centering the power button
-            Spacer(modifier = Modifier.weight(1f))
-
-            // 3. Centerpiece: Big Glassy Power Button with multi-state glow
-            GlassyPowerButton(
+            // 2. Centerpiece: Circular Dot Matrix Aura + Precision Cyber Connect Orb
+            CyberConnectButtonArea(
                 connectionState = connectionState,
                 isUnstable = isUnstable,
                 onClick = handleConnectClick
             )
 
-            Spacer(modifier = Modifier.weight(1.2f))
-
-            // 4. Active Config Selector Button (ISP Name + Package Icon + Switch sheet)
-            ActiveConfigButton(
+            // 3. Client Usage & Telemetry Widget (02 // USAGE & TELEMETRY)
+            ClientUsageWidget(
+                connectionState = connectionState,
+                trafficStats = trafficStats,
                 selectedConfig = selectedConfig,
-                configs = configs,
-                onSelectConfig = { config ->
-                    viewModel.selectConfig(config)
-                },
-                modifier = Modifier.padding(bottom = 8.dp)
+                userProfile = userProfile,
+                pingMs = pingMs
             )
+
+            Spacer(modifier = Modifier.height(4.dp))
         }
     }
 }

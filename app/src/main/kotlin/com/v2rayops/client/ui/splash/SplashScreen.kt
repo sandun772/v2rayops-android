@@ -64,6 +64,7 @@ fun SplashScreen(
     val cardProgress = remember { Animatable(0f) }
     val slideProgress = remember { Animatable(0f) }
     val glowProgress = remember { Animatable(0f) }
+    val exitAlpha = remember { Animatable(1f) }
 
     // Measured text width for exact sub-pixel centering on frame 0
     var textWidthPx by remember { mutableFloatStateOf(0f) }
@@ -101,7 +102,13 @@ fun SplashScreen(
         // Stage 5: User requirement: 250ms end idle time to admire the completed glowing lockup
         delay(250)
 
-        // Stage 6: Handoff to target screen
+        // Stage 6: Seamless dissolution blending into the main dashboard
+        exitAlpha.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+        )
+
+        // Handoff to target screen
         if (target == SplashNavigationTarget.Login) {
             onNavigateToLogin()
         } else {
@@ -121,6 +128,7 @@ fun SplashScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer { alpha = exitAlpha.value }
             .background(
                 Brush.radialGradient(
                     colors = listOf(
