@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -98,47 +100,91 @@ fun DashboardScreen(
         },
         containerColor = Color(0xFF050811) // Exact Deep Cosmic Background from mockups
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 2.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // 1. Status Capsule Pill (• DISCONNECTED / • HANDSHAKING / • CONNECTED)
-            StatusPill(connectionState = connectionState)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Spacer(modifier = Modifier.height(2.dp))
 
-            // 2. Big Digital Clock (00:00:00 or 01:24:37)
-            DigitalTimerText(connectionState = connectionState)
+                // 1. Status Capsule Pill (• DISCONNECTED / • HANDSHAKING / • CONNECTED)
+                StatusPill(connectionState = connectionState)
 
-            // 3. Center Concentric Dot Radar Dial (Smooth progressive wave entrance, subtle glassy power button)
-            ConcentricRadarDial(
-                connectionState = connectionState,
-                onClick = handleConnectClick
+                // 2. Big Digital Clock (00:00:00 or 01:24:37)
+                DigitalTimerText(connectionState = connectionState)
+
+                // 3. Center Concentric Dot Radar Dial
+                ConcentricRadarDial(
+                    connectionState = connectionState,
+                    onClick = handleConnectClick
+                )
+
+                // 4. Download / Upload Speed Section with Dividing Lines
+                SpeedDividedSection(
+                    connectionState = connectionState,
+                    trafficStats = trafficStats
+                )
+
+                // 5. Active Node Summary Card (Real brand icons & ISP / Limit display)
+                ActiveNodeSummaryCard(
+                    config = selectedConfig,
+                    pingMs = pingMs,
+                    onClick = onNavigateToServers
+                )
+
+                // 6. SPEED & OPTIMIZATION MODE Segmented Control (Balanced / Speed / Stability)
+                ProxyModeSelector(
+                    selectedMode = speedMode,
+                    onModeSelected = { speedMode = it }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Top Gradient Scrim: Blends scrolling content smoothly into the top bar with zero hard cuts!
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF050811),
+                                Color(0xFA050811),
+                                Color(0xCC050811),
+                                Color(0x77050811),
+                                Color(0x22050811),
+                                Color.Transparent
+                            )
+                        )
+                    )
             )
 
-            // 4. Download / Upload Speed Section with Dividing Lines
-            SpeedDividedSection(
-                connectionState = connectionState,
-                trafficStats = trafficStats
+            // Bottom Gradient Scrim: Blends into the bottom bar smoothly
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(18.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0xAA050811),
+                                Color(0xFF050811)
+                            )
+                        )
+                    )
             )
-
-            // 5. Active Node Summary Card (Real brand icons & ISP / Limit display)
-            ActiveNodeSummaryCard(
-                config = selectedConfig,
-                pingMs = pingMs,
-                onClick = onNavigateToServers
-            )
-
-            // 6. SPEED & OPTIMIZATION MODE Segmented Control (Balanced / Speed / Stability)
-            ProxyModeSelector(
-                selectedMode = speedMode,
-                onModeSelected = { speedMode = it }
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
         }
 
         // Usage & Cockpit Telemetry Modal (matching web dashboard widgets)

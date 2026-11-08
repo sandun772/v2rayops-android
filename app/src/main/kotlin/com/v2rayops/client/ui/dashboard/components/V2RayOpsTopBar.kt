@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,15 +34,20 @@ fun V2RayOpsTopBar(
     coreVersion: String = "Xray-core 25.3",
     modifier: Modifier = Modifier
 ) {
-    Row(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .background(Color(0xFF050811))
     ) {
-        // Left: Perfectly scaled Logo + Solid White "Ray" & Solid Indigo "OPS"
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Left: Perfectly scaled Logo + Solid White "Ray" & Solid Indigo "OPS"
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -97,4 +103,5 @@ fun V2RayOpsTopBar(
             )
         }
     }
+}
 }

@@ -154,10 +154,10 @@ fun ConcentricRadarDial(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 300dp Radar Field Container
+        // 284dp Radar Field Container
         Box(
             modifier = Modifier
-                .size(300.dp)
+                .size(284.dp)
                 .drawBehind {
                     val cx = size.width / 2f
                     val cy = size.height / 2f
@@ -262,10 +262,10 @@ fun ConcentricRadarDial(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Center Power Button — Flat Matte Obsidian disc (140dp) with razor-sharp 2dp border
+            // Center Power Button — Flat Matte Obsidian disc (136dp) with razor-sharp 2dp border
             Box(
                 modifier = Modifier
-                    .size(140.dp)
+                    .size(136.dp)
                     .clip(CircleShape)
                     .background(Color(0xFF090C19)) // Clean matte obsidian background
                     .border(
