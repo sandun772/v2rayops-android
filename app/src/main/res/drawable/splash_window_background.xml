@@ -3,10 +3,10 @@
     <!-- Solid Cyber Black Canvas -->
     <item android:drawable="@color/cyber_black" />
 
-    <!-- Centered Squircle Badge matching Compose Frame 0 pixel-for-pixel -->
+    <!-- Centered 1:1 Logo Graphic matching Stage 1 -->
     <item
-        android:width="84dp"
-        android:height="84dp"
+        android:width="68dp"
+        android:height="42dp"
         android:gravity="center"
-        android:drawable="@drawable/splash_squircle_badge" />
+        android:drawable="@drawable/v2rayops_logo_trimmed" />
 </layer-list>

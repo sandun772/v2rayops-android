@@ -58,7 +58,8 @@ fun SplashScreen(
     val density = LocalDensity.current
 
     // GPU-accelerated animatables: Zero relayout jank, 120fps smooth
-    val animProgress = remember { Animatable(0f) }
+    val cardProgress = remember { Animatable(0f) }
+    val slideProgress = remember { Animatable(0f) }
     val glowProgress = remember { Animatable(0f) }
 
     // Measured text width for exact sub-pixel centering on frame 0
@@ -73,20 +74,31 @@ fun SplashScreen(
     }
 
     LaunchedEffect(Unit) {
-        // 1. Start immediately on first frame - zero pre-stuck delay!
-        animProgress.animateTo(
+        // Stage 1: Brief 80ms pause showing the pristine 1:1 logo centered
+        delay(80)
+
+        // Stage 2: The round square (squircle) emerges and frames the centered logo
+        cardProgress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
         )
-        // 2. Ambient Cyber End-Glow blooms once lockup forms
+
+        // Stage 3: The squircle glides to the left and "RayOPS" brand text animates in
+        slideProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing)
+        )
+
+        // Stage 4: Ambient Cyber End-Glow blooms once lockup forms
         glowProgress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 260, easing = LinearOutSlowInEasing)
+            animationSpec = tween(durationMillis = 240, easing = LinearOutSlowInEasing)
         )
-        // 3. User requirement: 250ms end idle time to admire the completed glowing lockup
+
+        // Stage 5: User requirement: 250ms end idle time to admire the completed glowing lockup
         delay(250)
 
-        // 4. Handoff to target screen
+        // Stage 6: Handoff to target screen
         if (target == SplashNavigationTarget.Login) {
             onNavigateToLogin()
         } else {
@@ -94,13 +106,14 @@ fun SplashScreen(
         }
     }
 
-    val progress = animProgress.value
+    val cardVal = cardProgress.value
+    val slideVal = slideProgress.value
     val glowVal = glowProgress.value
 
     // GPU-translated positions
-    val logoTranslationX = (1f - progress) * initialShiftPx
-    val textTranslationX = (1f - progress) * with(density) { (-18).dp.toPx() }
-    val textAlpha = progress.coerceIn(0f, 1f)
+    val logoTranslationX = (1f - slideVal) * initialShiftPx
+    val textTranslationX = (1f - slideVal) * with(density) { (-18).dp.toPx() }
+    val textAlpha = slideVal.coerceIn(0f, 1f)
 
     Box(
         modifier = Modifier
@@ -134,35 +147,46 @@ fun SplashScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
-            // 1. Stylized "V2" Logo in Elevated Rounded Square (Squircle)
+            // 1. Stylized "V2" Logo: 1:1 on frame 0, then squircle emerges around it, then glides left
             Box(
                 modifier = Modifier
                     .size(84.dp)
                     .graphicsLayer {
                         translationX = logoTranslationX
-                    }
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(CyberCard)
-                    .border(
-                        border = BorderStroke(
-                            width = 1.5.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    CyberPrimary.copy(alpha = 0.5f + glowVal * 0.5f),
-                                    CyberAccent.copy(alpha = 0.4f + glowVal * 0.4f)
-                                )
-                            )
-                        ),
-                        shape = RoundedCornerShape(22.dp)
-                    ),
+                    },
                 contentAlignment = Alignment.Center
             ) {
+                // Round Square (Squircle) that emerges in Stage 2 around the 1:1 logo
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 0.84f + 0.16f * cardVal
+                            scaleY = 0.84f + 0.16f * cardVal
+                            alpha = cardVal
+                        }
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(CyberCard)
+                        .border(
+                            border = BorderStroke(
+                                width = 1.5.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        CyberPrimary.copy(alpha = 0.6f + glowVal * 0.4f),
+                                        CyberAccent.copy(alpha = 0.4f + glowVal * 0.4f)
+                                    )
+                                )
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        )
+                )
+
+                // 1:1 Logo Graphic: visible from frame 0, perfectly centered
                 Image(
                     painter = painterResource(id = R.drawable.v2rayops_logo_trimmed),
                     contentDescription = "V2 Logo",
                     modifier = Modifier
-                        .size(58.dp, 42.dp)
-                        .scale(1.05f),
+                        .size(width = 68.dp, height = 42.dp),
                     contentScale = ContentScale.Fit
                 )
             }
