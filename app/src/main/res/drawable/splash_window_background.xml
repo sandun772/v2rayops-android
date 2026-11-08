@@ -5,8 +5,8 @@
 
     <!-- Centered Logo Squircle Graphic -->
     <item
-        android:width="88dp"
-        android:height="88dp"
+        android:width="84dp"
+        android:height="84dp"
         android:gravity="center"
         android:drawable="@drawable/v2rayops_logo" />
 </layer-list>
