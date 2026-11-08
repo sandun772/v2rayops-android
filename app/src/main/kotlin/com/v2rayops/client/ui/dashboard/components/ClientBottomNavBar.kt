@@ -2,6 +2,10 @@ package com.v2rayops.client.ui.dashboard.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -228,6 +233,18 @@ private fun MinimalConnectCenterItem(
     val isConnected = connectionState.isConnected
     val isConnecting = connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
+    // Gentle breathing pulse for the ambient glow when connected or connecting
+    val infiniteTransition = rememberInfiniteTransition(label = "NavHeroPulse")
+    val glowScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = if (isConnected) 1.08f else if (isConnecting) 1.12f else 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "HeroGlowScale"
+    )
+
     val targetBorder = when {
         isConnected -> Color(0xFF6366F1)
         isConnecting -> Color(0xFFF59E0B)
@@ -276,28 +293,53 @@ private fun MinimalConnectCenterItem(
             ),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Minimalist Obsidian Disc nestled inside the narrow curve
         Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF090D1A))
-                .border(
-                    width = 1.5.dp,
-                    color = borderColor,
-                    shape = CircleShape
-                ),
+            modifier = Modifier.size(46.dp),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Filled.PowerSettingsNew,
-                contentDescription = actionLabel,
-                tint = iconColor,
-                modifier = Modifier.size(22.dp)
-            )
+            // Luminous ambient glow aura when connected (visible even when user navigates to Finetune!)
+            if (isConnected || isConnecting) {
+                val auraColor = if (isConnected) Color(0xFF6366F1) else Color(0xFFF59E0B)
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .scale(glowScale)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    auraColor.copy(alpha = 0.42f),
+                                    auraColor.copy(alpha = 0.16f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+            }
+
+            // Minimalist Obsidian Disc nestled inside the narrow curve
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF090D1A))
+                    .border(
+                        width = if (isConnected || isConnecting) 1.8.dp else 1.2.dp,
+                        color = borderColor,
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PowerSettingsNew,
+                    contentDescription = actionLabel,
+                    tint = iconColor,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(3.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
         Text(
             text = actionLabel,
@@ -310,14 +352,14 @@ private fun MinimalConnectCenterItem(
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // Tiny 2.5dp minimalist indicator dot when active / connected / connecting
+        // Vibrant 3dp indicator dot (Emerald green when connected, amber when connecting)
         Box(
             modifier = Modifier
-                .size(2.5.dp)
+                .size(3.dp)
                 .clip(CircleShape)
                 .background(
                     when {
-                        isConnected -> Color(0xFF818CF8)
+                        isConnected -> Color(0xFF22C55E)
                         isConnecting -> Color(0xFFF59E0B)
                         isSelected -> Color(0xFF818CF8)
                         else -> Color.Transparent

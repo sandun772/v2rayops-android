@@ -68,6 +68,7 @@ fun ServerSelectionScreen(
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val pingMap by viewModel.pingMap.collectAsState()
     val isTestingAll by viewModel.isTestingAll.collectAsState()
+    val connectionState by viewModel.connectionState.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var showImportDialog by remember { mutableStateOf(false) }
 
@@ -95,6 +96,7 @@ fun ServerSelectionScreen(
         bottomBar = {
             ClientBottomNavBar(
                 selectedTab = ClientNavTab.FINETUNE,
+                connectionState = connectionState,
                 onTabSelected = { tab ->
                     when (tab) {
                         ClientNavTab.CONNECT -> onNavigateToHome()
