@@ -7,6 +7,8 @@ import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.domain.repository.AuthRepository
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.network.ConnectionDiagnosticsManager
+import com.v2rayops.client.network.FineTuneState
+import com.v2rayops.client.network.OneClickFineTuneManager
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -25,10 +27,12 @@ class ServerSelectionViewModel @Inject constructor(
     private val subscriptionRepository: SubscriptionRepository,
     private val authRepository: AuthRepository,
     private val diagnosticsManager: ConnectionDiagnosticsManager,
-    private val vpnManager: VpnManager
+    private val vpnManager: VpnManager,
+    private val fineTuneManager: OneClickFineTuneManager
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
+    val fineTuneState: StateFlow<FineTuneState> = fineTuneManager.state
 
     val configs: StateFlow<List<VpnConfig>> = subscriptionRepository.observeConfigs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -58,6 +62,19 @@ class ServerSelectionViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    fun startOneClickFineTune() {
+        val target = selectedConfig.value ?: configs.value.firstOrNull()
+        fineTuneManager.startFineTune(target)
+    }
+
+    fun stopOneClickFineTune() {
+        fineTuneManager.stopFineTune()
+    }
+
+    fun dismissFineTuneReport() {
+        fineTuneManager.dismissReport()
     }
 
     /**
