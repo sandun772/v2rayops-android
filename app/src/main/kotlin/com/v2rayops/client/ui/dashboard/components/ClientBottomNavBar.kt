@@ -1,6 +1,8 @@
 package com.v2rayops.client.ui.dashboard.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,10 +33,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,27 +54,108 @@ enum class ClientNavTab {
     SETTINGS
 }
 
+/**
+ * Ultra-minimalist cyber cockpit bottom navigation bar:
+ * - Narrow, smooth cubic curved cradle contour along the top edge around the middle connect button
+ * - Minimalist obsidian Connect disc with razor-thin luminous indigo border (no clunky blue bubble)
+ * - Clean, low-noise aesthetic with micro-typography and subtle dot indicators
+ */
 @Composable
 fun ClientBottomNavBar(
     selectedTab: ClientNavTab,
     onTabSelected: (ClientNavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val density = LocalDensity.current
+
+    // Dimensions for the narrow curved cradle
+    val curveHalfWidthPx = with(density) { 36.dp.toPx() }
+    val curveControlHalfWidthPx = with(density) { 22.dp.toPx() }
+    val curveDepthPx = with(density) { 13.dp.toPx() }
+    val strokeWidthPx = with(density) { 1.dp.toPx() }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF050812))
-            .border(width = 1.dp, color = Color(0xFF121A2C))
+            .drawBehind {
+                val w = size.width
+                val h = size.height
+                val cx = w / 2f
+
+                // --- 1. Custom Filled Background with Narrow Curved Cradle ---
+                val bgPath = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(cx - curveHalfWidthPx, 0f)
+
+                    // Smooth entry into narrow cradle
+                    cubicTo(
+                        cx - curveControlHalfWidthPx, 0f,
+                        cx - curveControlHalfWidthPx + 2f, curveDepthPx,
+                        cx, curveDepthPx
+                    )
+                    // Smooth exit out of narrow cradle
+                    cubicTo(
+                        cx + curveControlHalfWidthPx - 2f, curveDepthPx,
+                        cx + curveControlHalfWidthPx, 0f,
+                        cx + curveHalfWidthPx, 0f
+                    )
+
+                    lineTo(w, 0f)
+                    lineTo(w, h)
+                    lineTo(0f, h)
+                    close()
+                }
+
+                // Fill with deep cyber obsidian
+                drawPath(path = bgPath, color = Color(0xFF070A14))
+
+                // --- 2. Top Border with Narrow Curved Cradle ---
+                val borderPath = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(cx - curveHalfWidthPx, 0f)
+                    cubicTo(
+                        cx - curveControlHalfWidthPx, 0f,
+                        cx - curveControlHalfWidthPx + 2f, curveDepthPx,
+                        cx, curveDepthPx
+                    )
+                    cubicTo(
+                        cx + curveControlHalfWidthPx - 2f, curveDepthPx,
+                        cx + curveControlHalfWidthPx, 0f,
+                        cx + curveHalfWidthPx, 0f
+                    )
+                    lineTo(w, 0f)
+                }
+
+                drawPath(
+                    path = borderPath,
+                    color = Color(0xFF141C30),
+                    style = Stroke(width = strokeWidthPx)
+                )
+
+                // Subtle ambient glow behind the center cradle
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF6366F1).copy(alpha = 0.12f),
+                            Color.Transparent
+                        ),
+                        center = Offset(cx, curveDepthPx * 0.5f),
+                        radius = curveHalfWidthPx * 1.2f
+                    ),
+                    radius = curveHalfWidthPx * 1.2f,
+                    center = Offset(cx, curveDepthPx * 0.5f)
+                )
+            }
             .navigationBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 1. Finetune / Diagnose
-            StandardNavItem(
+            // 1. Finetune
+            MinimalNavItem(
                 icon = Icons.Filled.Tune,
                 label = "Finetune",
                 isSelected = selectedTab == ClientNavTab.FINETUNE,
@@ -75,21 +163,21 @@ fun ClientBottomNavBar(
             )
 
             // 2. Usage
-            StandardNavItem(
+            MinimalNavItem(
                 icon = Icons.AutoMirrored.Filled.ShowChart,
                 label = "Usage",
                 isSelected = selectedTab == ClientNavTab.USAGE,
                 onClick = { onTabSelected(ClientNavTab.USAGE) }
             )
 
-            // 3. Connect (Centerpiece Hero Button — Elevated & Highlighted)
-            CenterConnectHeroItem(
+            // 3. Connect (Minimalist Center Hero Button nestled inside the narrow curved cradle)
+            MinimalConnectCenterItem(
                 isSelected = selectedTab == ClientNavTab.CONNECT,
                 onClick = { onTabSelected(ClientNavTab.CONNECT) }
             )
 
             // 4. Tools
-            StandardNavItem(
+            MinimalNavItem(
                 icon = Icons.Filled.Build,
                 label = "Tools",
                 isSelected = selectedTab == ClientNavTab.TOOLS,
@@ -97,7 +185,7 @@ fun ClientBottomNavBar(
             )
 
             // 5. Settings
-            StandardNavItem(
+            MinimalNavItem(
                 icon = Icons.Filled.Settings,
                 label = "Settings",
                 isSelected = selectedTab == ClientNavTab.SETTINGS,
@@ -107,23 +195,32 @@ fun ClientBottomNavBar(
     }
 }
 
+/**
+ * Minimalist Center Connect Item:
+ * Matte obsidian disc with razor-thin luminous border nestled directly inside the cradle
+ */
 @Composable
-private fun CenterConnectHeroItem(
+private fun MinimalConnectCenterItem(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val buttonBrush = if (isSelected) {
-        Brush.verticalGradient(
-            colors = listOf(Color(0xFF3B82F6), Color(0xFF6366F1))
-        )
-    } else {
-        Brush.verticalGradient(
-            colors = listOf(Color(0xFF1E2D48), Color(0xFF101726))
-        )
-    }
+    val borderColor by animateColorAsState(
+        targetValue = if (isSelected) Color(0xFF6366F1) else Color(0xFF222F46),
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "HeroBorderColor"
+    )
 
-    val iconColor = if (isSelected) Color.White else Color(0xFF818CF8)
-    val labelColor = if (isSelected) Color(0xFF818CF8) else Color(0xFF64748B)
+    val iconColor by animateColorAsState(
+        targetValue = if (isSelected) Color(0xFFA5B4FC) else Color(0xFF64748B),
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "HeroIconColor"
+    )
+
+    val labelColor by animateColorAsState(
+        targetValue = if (isSelected) Color(0xFFA5B4FC) else Color(0xFF64748B),
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "HeroLabelColor"
+    )
 
     Column(
         modifier = Modifier
@@ -135,16 +232,15 @@ private fun CenterConnectHeroItem(
             ),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Glowing Elevated Center Disc
+        // Minimalist Obsidian Disc nestled inside the narrow curve
         Box(
             modifier = Modifier
-                .size(46.dp)
-                .shadow(elevation = if (isSelected) 8.dp else 4.dp, shape = CircleShape, spotColor = Color(0xFF6366F1))
+                .size(42.dp)
                 .clip(CircleShape)
-                .background(buttonBrush)
+                .background(Color(0xFF090D1A))
                 .border(
                     width = 1.5.dp,
-                    color = if (isSelected) Color(0xFFA5B4FC) else Color(0xFF2E3D5B),
+                    color = borderColor,
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
@@ -153,30 +249,36 @@ private fun CenterConnectHeroItem(
                 imageVector = Icons.Filled.PowerSettingsNew,
                 contentDescription = "Connect",
                 tint = iconColor,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(22.dp)
             )
         }
 
-        Spacer(modifier = Modifier.height(2.dp))
+        Spacer(modifier = Modifier.height(3.dp))
 
         Text(
             text = "Connect",
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
+            fontSize = 9.5.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            letterSpacing = 0.5.sp,
             color = labelColor
         )
     }
 }
 
+/**
+ * Minimalist standard navigation tab with subtle indicator dot when selected
+ */
 @Composable
-private fun StandardNavItem(
+private fun MinimalNavItem(
     icon: ImageVector,
     label: String,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
     val tint by animateColorAsState(
-        targetValue = if (isSelected) Color(0xFF818CF8) else Color(0xFF64748B),
+        targetValue = if (isSelected) Color(0xFFA5B4FC) else Color(0xFF4A5568),
+        animationSpec = tween(250, easing = FastOutSlowInEasing),
         label = "NavTint"
     )
 
@@ -187,21 +289,34 @@ private fun StandardNavItem(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = tint,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(19.dp)
         )
+
         Spacer(modifier = Modifier.height(3.dp))
+
         Text(
             text = label,
-            fontSize = 10.sp,
+            fontSize = 9.5.sp,
+            fontFamily = FontFamily.Monospace,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
             color = tint
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Tiny 2.5dp minimalist indicator dot when active
+        Box(
+            modifier = Modifier
+                .size(2.5.dp)
+                .clip(CircleShape)
+                .background(if (isSelected) Color(0xFF818CF8) else Color.Transparent)
         )
     }
 }
