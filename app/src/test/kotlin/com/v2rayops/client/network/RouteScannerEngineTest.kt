@@ -76,4 +76,110 @@ class RouteScannerEngineTest {
         assertTrue(domains.contains("support.zoom.us"))
         assertTrue(domains.contains("p16-va.tiktokcdn.com"))
     }
+
+    @Test
+    fun commonProxyPorts_categorizesTlsAndHttpPortsCorrectly() {
+        // Standard and Cloudflare TLS ports
+        assertTrue(CommonProxyPorts.isTlsPort(443))
+        assertTrue(CommonProxyPorts.isTlsPort(8443))
+        assertTrue(CommonProxyPorts.isTlsPort(2053))
+        assertTrue(CommonProxyPorts.isTlsPort(2083))
+        assertTrue(CommonProxyPorts.isTlsPort(2087))
+        assertTrue(CommonProxyPorts.isTlsPort(2096))
+
+        // Standard and Cloudflare HTTP cleartext ports
+        assertFalse(CommonProxyPorts.isTlsPort(80))
+        assertFalse(CommonProxyPorts.isTlsPort(8080))
+        assertFalse(CommonProxyPorts.isTlsPort(8880))
+        assertFalse(CommonProxyPorts.isTlsPort(2052))
+        assertFalse(CommonProxyPorts.isTlsPort(2082))
+        assertFalse(CommonProxyPorts.isTlsPort(2086))
+        assertFalse(CommonProxyPorts.isTlsPort(2095))
+
+        // Quick multi ports must contain both TLS and HTTP ports
+        assertTrue(CommonProxyPorts.QUICK_MULTI_PORTS.contains(443))
+        assertTrue(CommonProxyPorts.QUICK_MULTI_PORTS.contains(8443))
+        assertTrue(CommonProxyPorts.QUICK_MULTI_PORTS.contains(2083))
+        assertTrue(CommonProxyPorts.QUICK_MULTI_PORTS.contains(80))
+        assertTrue(CommonProxyPorts.QUICK_MULTI_PORTS.contains(8080))
+    }
+
+    @Test
+    fun portScanResult_formatsPortNamesCorrectly() {
+        val r443 = PortScanResult(443, PortProtocol.TLS, isOpen = true)
+        val r8443 = PortScanResult(8443, PortProtocol.TLS, isOpen = true)
+        val r80 = PortScanResult(80, PortProtocol.HTTP, isOpen = true)
+        val r8080 = PortScanResult(8080, PortProtocol.HTTP, isOpen = true)
+
+        assertTrue(r443.portName.contains("443"))
+        assertTrue(r8443.portName.contains("8443"))
+        assertTrue(r80.portName.contains("80"))
+        assertTrue(r8080.portName.contains("8080"))
+    }
+
+    @Test
+    fun threeXUiInboundSpec_generatesAccurateSpecs() {
+        val tlsSpec = ThreeXUiInboundSpec(
+            remark = "V2RayOps-VLESS-WS-8443",
+            protocol = "vless",
+            port = 8443,
+            isTls = true,
+            security = "tls",
+            listen = "0.0.0.0",
+            network = "ws",
+            wsPath = "/v2rayops",
+            wsHost = "sg-v2rayops.vpnxhub.com",
+            sni = "sg-v2rayops.vpnxhub.com",
+            clientUuid = "12345678-1234-1234-1234-123456789abc",
+            panelUrl = "https://v2rayops.vpnxhub.com:2083/",
+            fullJsonSnippet = "{\"port\": 8443, \"protocol\": \"vless\"}",
+            instructions = listOf("Step 1: Open 3X-UI")
+        )
+
+        assertEquals(8443, tlsSpec.port)
+        assertTrue(tlsSpec.isTls)
+        assertEquals("tls", tlsSpec.security)
+        assertTrue(tlsSpec.summaryText.contains("Port: 8443"))
+        assertTrue(tlsSpec.summaryText.contains("Protocol: vless"))
+        assertTrue(tlsSpec.summaryText.contains("Network (Transmission): ws"))
+        assertTrue(tlsSpec.summaryText.contains("Security: tls"))
+
+        val httpSpec = ThreeXUiInboundSpec(
+            remark = "V2RayOps-VLESS-WS-80",
+            protocol = "vless",
+            port = 80,
+            isTls = false,
+            security = "none",
+            listen = "0.0.0.0",
+            network = "ws",
+            wsPath = "/v2rayops",
+            wsHost = "sg-v2rayops.vpnxhub.com",
+            sni = "",
+            clientUuid = "12345678-1234-1234-1234-123456789abc",
+            panelUrl = "https://v2rayops.vpnxhub.com:2083/",
+            fullJsonSnippet = "{\"port\": 80, \"protocol\": \"vless\"}",
+            instructions = listOf("Step 1: Open 3X-UI")
+        )
+
+        assertEquals(80, httpSpec.port)
+        assertFalse(httpSpec.isTls)
+        assertEquals("none", httpSpec.security)
+        assertTrue(httpSpec.summaryText.contains("Security: none"))
+    }
+
+    @Test
+    fun candidate_supportsCustomTargetPortAndVerifiedPorts() {
+        val base = RouteScannerEngine.DEFAULT_CANDIDATES.first()
+        assertEquals(443, base.targetPort)
+
+        val updatedPort = base.copy(
+            targetPort = 8443,
+            verifiedPorts = listOf(443, 8443, 2083, 80)
+        )
+
+        assertEquals(8443, updatedPort.targetPort)
+        assertEquals(4, updatedPort.verifiedPorts.size)
+        assertTrue(updatedPort.verifiedPorts.contains(80))
+        assertTrue(updatedPort.verifiedPorts.contains(8443))
+    }
 }

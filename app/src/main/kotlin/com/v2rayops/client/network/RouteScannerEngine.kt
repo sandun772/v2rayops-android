@@ -20,7 +20,9 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.InputStreamReader
+import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -70,6 +72,79 @@ enum class ScanProfile(
     QUICK_AUDIT("Quick Audit (1-Sample)", "QUICK AUDIT", rounds = 1, sampleDelayMs = 0L, timeoutPerSampleMs = 2500)
 }
 
+object CommonProxyPorts {
+    val POPULAR_TLS_PORTS = listOf(443, 8443, 2053, 2083, 2087, 2096)
+    val POPULAR_HTTP_PORTS = listOf(80, 8080, 8880, 2052, 2082, 2086, 2095)
+    val QUICK_MULTI_PORTS = listOf(443, 8443, 2053, 2083, 80, 8080)
+    val ALL_PORTS = listOf(443, 8443, 2053, 2083, 2087, 2096, 80, 8080, 8880, 2052, 2082, 2086, 2095)
+
+    fun isTlsPort(port: Int): Boolean = port in POPULAR_TLS_PORTS
+}
+
+enum class PortProtocol(val label: String) {
+    TLS("TLS / HTTPS"),
+    HTTP("HTTP / Cleartext")
+}
+
+data class PortScanResult(
+    val port: Int,
+    val protocol: PortProtocol,
+    val isOpen: Boolean,
+    val isWsReady: Boolean = false,
+    val latencyMs: Long = 0L,
+    val error: String = ""
+) {
+    val portName: String get() = when (port) {
+        443 -> "443 (Standard HTTPS)"
+        8443 -> "8443 (Cloudflare SSL Alt)"
+        2053 -> "2053 (Cloudflare SSL)"
+        2083 -> "2083 (cPanel / Cloudflare SSL)"
+        2087 -> "2087 (WHM / Cloudflare SSL)"
+        2096 -> "2096 (Webmail / Cloudflare SSL)"
+        80 -> "80 (Standard HTTP)"
+        8080 -> "8080 (HTTP Alt Proxy)"
+        8880 -> "8880 (Cloudflare HTTP)"
+        2052 -> "2052 (Cloudflare HTTP)"
+        2082 -> "2082 (cPanel HTTP)"
+        2086 -> "2086 (WHM HTTP)"
+        2095 -> "2095 (Webmail HTTP)"
+        else -> "$port (${protocol.name})"
+    }
+}
+
+data class ThreeXUiInboundSpec(
+    val remark: String,
+    val protocol: String = "vless",
+    val port: Int,
+    val isTls: Boolean,
+    val security: String,
+    val listen: String = "0.0.0.0",
+    val network: String = "ws",
+    val wsPath: String = "/v2rayops",
+    val wsHost: String = "sg-v2rayops.vpnxhub.com",
+    val sni: String = "sg-v2rayops.vpnxhub.com",
+    val clientUuid: String = "",
+    val panelUrl: String = "https://v2rayops.vpnxhub.com:2083/",
+    val fullJsonSnippet: String = "",
+    val instructions: List<String> = emptyList()
+) {
+    val summaryText: String
+        get() = """
+            === 3X-UI INBOUND SPECIFICATION ===
+            Remark: $remark
+            Protocol: $protocol
+            Port: $port
+            Listening IP: $listen
+            Network (Transmission): $network
+            WS Path: $wsPath
+            WS Host Header: $wsHost
+            Security: $security
+            ${if (isTls) "TLS SNI: $sni" else "TLS SNI: (None - Plaintext WS)"}
+            Client UUID: ${clientUuid.ifBlank { "Auto/New" }}
+            3X-UI Panel URL: $panelUrl
+        """.trimIndent()
+}
+
 data class SniRouteCandidate(
     val domain: String,                       // Bug host domain (e.g. support.zoom.us)
     val strategy: RouteStrategy,              // STANDARD_SNI or ADDR_SNI
@@ -90,7 +165,9 @@ data class SniRouteCandidate(
     val maxLatencyMs: Long = 0L,              // Maximum recorded latency
     val avgLatencyMs: Long = 0L,              // Average latency across successful samples
     val stabilityScore: Int = 0,              // Stability index (0 - 100%)
-    val isSustainedPass: Boolean = false      // True if 100% pass without loss
+    val isSustainedPass: Boolean = false,     // True if 100% pass without loss
+    val verifiedPorts: List<Int> = listOf(443),
+    val portAuditResults: List<PortScanResult> = emptyList()
 ) {
     val isRockSolid: Boolean get() = status == SniStatus.WS_READY && stabilityScore >= 85 && packetLossPercent == 0
 }
@@ -320,32 +397,37 @@ class RouteScannerEngine @Inject constructor(
             rawSocket = s
             val tcpLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(1L)
 
-            val startTls = System.currentTimeMillis()
-            val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
-                override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            })
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(null, trustAll, SecureRandom())
+            val isTls = CommonProxyPorts.isTlsPort(port)
+            val activeSocket: Socket = if (isTls) {
+                val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
+                    override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                })
+                val sslContext = SSLContext.getInstance("TLS")
+                sslContext.init(null, trustAll, SecureRandom())
 
-            val ssl = sslContext.socketFactory.createSocket(s, targetIp, port, true) as SSLSocket
-            ssl.tcpNoDelay = true
-            ssl.setSoLinger(true, 0)
-            val sslParams = SSLParameters()
-            sslParams.serverNames = listOf(SNIHostName(sni))
-            ssl.sslParameters = sslParams
-            ssl.soTimeout = timeoutMs
+                val ssl = sslContext.socketFactory.createSocket(s, targetIp, port, true) as SSLSocket
+                ssl.tcpNoDelay = true
+                ssl.setSoLinger(true, 0)
+                val sslParams = SSLParameters()
+                sslParams.serverNames = listOf(SNIHostName(sni))
+                ssl.sslParameters = sslParams
+                ssl.soTimeout = timeoutMs
 
-            ssl.startHandshake()
-            sslSocket = ssl
-            val tlsLatency = (System.currentTimeMillis() - startTls).coerceAtLeast(1L)
+                ssl.startHandshake()
+                sslSocket = ssl
+                ssl
+            } else {
+                s.soTimeout = timeoutMs
+                s
+            }
 
             var wsPassed = false
             var wsError = ""
             try {
-                val writer = OutputStreamWriter(ssl.outputStream, "UTF-8")
-                val reader = BufferedReader(InputStreamReader(ssl.inputStream, "UTF-8"))
+                val writer = OutputStreamWriter(activeSocket.outputStream, "UTF-8")
+                val reader = BufferedReader(InputStreamReader(activeSocket.inputStream, "UTF-8"))
 
                 val nonce = ByteArray(16)
                 SecureRandom().nextBytes(nonce)
@@ -370,7 +452,7 @@ class RouteScannerEngine @Inject constructor(
                 wsError = e.message ?: "WS upgrade failed"
             }
 
-            val totalLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(tcpLatency + tlsLatency)
+            val totalLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(tcpLatency)
             return if (wsPassed) {
                 SampleProbeResult(true, true, totalLatency, "")
             } else if (wsError.isNotBlank() && (wsError.contains("400") || wsError.contains("HTTP"))) {
@@ -434,6 +516,49 @@ class RouteScannerEngine @Inject constructor(
             else -> SniStatus.BLOCKED_TIMEOUT
         }
 
+        // Multi-port check: Discover open ports on candidate (e.g. 443, 8443, 2053, 2083, 80, 8080)
+        val verifiedPorts = mutableListOf<Int>()
+        val portAuditList = mutableListOf<PortScanResult>()
+
+        val mainIsOpen = successCount > 0
+        val mainIsTls = CommonProxyPorts.isTlsPort(port)
+        if (mainIsOpen) {
+            verifiedPorts.add(port)
+        }
+        portAuditList.add(
+            PortScanResult(
+                port = port,
+                protocol = if (mainIsTls) PortProtocol.TLS else PortProtocol.HTTP,
+                isOpen = mainIsOpen,
+                isWsReady = wsSuccessCount > 0,
+                latencyMs = avgLatency,
+                error = if (mainIsOpen) "" else lastError
+            )
+        )
+
+        // If candidate host is responsive, probe other ports in QUICK_MULTI_PORTS
+        val otherPorts = CommonProxyPorts.QUICK_MULTI_PORTS.filter { it != port }
+        if (mainIsOpen) {
+            for (p in otherPorts) {
+                val pTls = CommonProxyPorts.isTlsPort(p)
+                val pResult = probeSingleSample(targetHost, p, sni, wsHost, wsPath, timeoutMs = 1200)
+                val pIsOpen = pResult.success || pResult.isWsReady
+                if (pIsOpen) {
+                    verifiedPorts.add(p)
+                }
+                portAuditList.add(
+                    PortScanResult(
+                        port = p,
+                        protocol = if (pTls) PortProtocol.TLS else PortProtocol.HTTP,
+                        isOpen = pIsOpen,
+                        isWsReady = pResult.isWsReady,
+                        latencyMs = if (pIsOpen) pResult.latencyMs else 0L,
+                        error = if (pIsOpen) "" else pResult.error
+                    )
+                )
+            }
+        }
+
         // Calculate Reliability & Stability Score (0 - 100%)
         // 60% based on success rate, 25% on low jitter consistency, 15% on latency tier
         val successRatio = successCount.toFloat() / totalRounds.toFloat()
@@ -470,6 +595,8 @@ class RouteScannerEngine @Inject constructor(
             packetLossPercent = packetLossPercent,
             stabilityScore = stabilityScore,
             isSustainedPass = isSustainedPass,
+            verifiedPorts = if (verifiedPorts.isNotEmpty()) verifiedPorts.distinct().sorted() else listOf(port),
+            portAuditResults = portAuditList.sortedBy { it.port },
             errorDetail = when {
                 wsSuccessCount == totalRounds -> "Rock-Solid: $totalRounds/$totalRounds Pass (0% Loss, ±${jitter}ms Jitter)"
                 wsSuccessCount > 0 -> "Intermittent WS: $wsSuccessCount/$totalRounds Pass ($packetLossPercent% Loss)"
@@ -477,6 +604,30 @@ class RouteScannerEngine @Inject constructor(
                 else -> "Blocked by carrier: ${lastError.ifBlank { "Handshake timed out" }}"
             }
         )
+    }
+
+    /**
+     * Deep port audit: Probes all 13 Cloudflare / proxy ports on the candidate host.
+     */
+    suspend fun auditAllPorts(candidate: SniRouteCandidate): List<PortScanResult> = withContext(dispatchers.io) {
+        val targetHost = candidate.targetHost
+        val sni = candidate.sni
+        val wsHost = candidate.wsHost
+        val wsPath = candidate.wsPath
+
+        CommonProxyPorts.ALL_PORTS.map { p ->
+            val pTls = CommonProxyPorts.isTlsPort(p)
+            val res = probeSingleSample(targetHost, p, sni, wsHost, wsPath, timeoutMs = 1500)
+            val isOpen = res.success || res.isWsReady
+            PortScanResult(
+                port = p,
+                protocol = if (pTls) PortProtocol.TLS else PortProtocol.HTTP,
+                isOpen = isOpen,
+                isWsReady = res.isWsReady,
+                latencyMs = if (isOpen) res.latencyMs else 0L,
+                error = if (isOpen) "" else res.error
+            )
+        }
     }
 
     suspend fun scanAll(
@@ -565,13 +716,16 @@ class RouteScannerEngine @Inject constructor(
 
     /**
      * Applies the selected candidate to the active V2Ray configuration.
-     * Rewrites destination address, SNI, and WS Host parameters and cleanly reloads the tunnel.
+     * Rewrites destination address, target port, SNI, and WS Host parameters and cleanly reloads the tunnel.
      */
     suspend fun applySniRoute(candidate: SniRouteCandidate): AppResult<VpnConfig> = withContext(dispatchers.io) {
         val current = subscriptionRepository.observeSelectedConfig().first()
             ?: return@withContext AppResult.Failure(com.v2rayops.client.core.error.AppError.Validation("No active config selected to tune"))
 
         var updatedUri = current.configUri
+        val targetPort = candidate.targetPort
+        val isTls = CommonProxyPorts.isTlsPort(targetPort)
+        val securityVal = if (isTls) "tls" else "none"
 
         if (current.isVmess) {
             try {
@@ -581,16 +735,18 @@ class RouteScannerEngine @Inject constructor(
 
                 if (candidate.strategy == RouteStrategy.ADDR_SNI) {
                     json.put("add", candidate.domain)
-                    json.put("port", candidate.targetPort)
-                    json.put("sni", candidate.wsHost)
+                    json.put("port", targetPort)
+                    json.put("sni", if (isTls) candidate.wsHost else "")
                     json.put("host", candidate.wsHost)
-                    json.put("insecure", true)
+                    json.put("tls", securityVal)
+                    json.put("insecure", isTls)
                 } else {
                     json.put("add", DEFAULT_VPS_DOMAIN)
-                    json.put("port", 443)
-                    json.put("sni", candidate.domain)
+                    json.put("port", targetPort)
+                    json.put("sni", if (isTls) candidate.domain else "")
                     json.put("host", candidate.wsHost)
-                    json.put("insecure", true)
+                    json.put("tls", securityVal)
+                    json.put("insecure", isTls)
                 }
                 val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
                 updatedUri = "vmess://$encoded"
@@ -600,23 +756,34 @@ class RouteScannerEngine @Inject constructor(
         } else {
             if (candidate.strategy == RouteStrategy.ADDR_SNI) {
                 // Strategy 2 (Addr SNI Fronting):
-                // Destination address becomes candidate.domain (e.g. support.zoom.us:443)
-                // SNI becomes VPS domain (sg-v2rayops.vpnxhub.com)
+                // Destination address becomes candidate.domain (e.g. support.zoom.us:port)
+                // SNI becomes VPS domain (sg-v2rayops.vpnxhub.com) if TLS
                 // Host becomes VPS domain (sg-v2rayops.vpnxhub.com)
-                // allowInsecure is enabled for zero-rated certificate fronting
-                updatedUri = replaceAddressAndPort(updatedUri, candidate.domain, candidate.targetPort)
-                updatedUri = replaceQueryParam(updatedUri, "sni", candidate.wsHost)
+                updatedUri = replaceAddressAndPort(updatedUri, candidate.domain, targetPort)
+                updatedUri = replaceQueryParam(updatedUri, "security", securityVal)
+                if (isTls) {
+                    updatedUri = replaceQueryParam(updatedUri, "sni", candidate.wsHost)
+                    updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+                } else {
+                    updatedUri = removeQueryParam(updatedUri, "sni")
+                    updatedUri = removeQueryParam(updatedUri, "allowInsecure")
+                }
                 updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
-                updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
             } else {
                 // Strategy 1 (Standard SNI):
                 // Destination address is VPS IP / domain
-                // SNI becomes candidate.domain
+                // SNI becomes candidate.domain if TLS
                 // Host remains VPS domain
-                updatedUri = replaceAddressAndPort(updatedUri, DEFAULT_VPS_DOMAIN, 443)
-                updatedUri = replaceQueryParam(updatedUri, "sni", candidate.domain)
+                updatedUri = replaceAddressAndPort(updatedUri, DEFAULT_VPS_DOMAIN, targetPort)
+                updatedUri = replaceQueryParam(updatedUri, "security", securityVal)
+                if (isTls) {
+                    updatedUri = replaceQueryParam(updatedUri, "sni", candidate.domain)
+                    updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+                } else {
+                    updatedUri = removeQueryParam(updatedUri, "sni")
+                    updatedUri = removeQueryParam(updatedUri, "allowInsecure")
+                }
                 updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
-                updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
             }
         }
 
@@ -632,19 +799,140 @@ class RouteScannerEngine @Inject constructor(
             sni = parsed.sni,
             wsHost = parsed.wsHost,
             wsPath = parsed.wsPath,
-            remark = "$cleanName [$strategyTag: ${candidate.domain}]"
+            remark = "$cleanName [$strategyTag: ${candidate.domain}:$targetPort]"
         )
 
-        AppLogger.i(TAG, "Applied winning route [${candidate.strategy.name}] '${candidate.domain}' to config #${updatedConfig.id} (Addr: ${updatedConfig.effectiveAddr}, SNI: ${updatedConfig.effectiveSni})")
+        AppLogger.i(TAG, "Applied winning route [${candidate.strategy.name}] '${candidate.domain}:$targetPort' to config #${updatedConfig.id} (Addr: ${updatedConfig.effectiveAddr}, SNI: ${updatedConfig.effectiveSni})")
         subscriptionRepository.selectConfig(updatedConfig)
 
         // If currently running, cleanly reconnect with the newly tuned route
         if (vpnManager.connectionState.value.isConnected) {
-            AppLogger.i(TAG, "Reconnecting tunnel with newly tuned route (${candidate.strategy.shortTag}: ${candidate.domain})")
+            AppLogger.i(TAG, "Reconnecting tunnel with newly tuned route (${candidate.strategy.shortTag}: ${candidate.domain}:$targetPort)")
             vpnManager.connect(updatedConfig)
         }
 
         AppResult.Success(updatedConfig)
+    }
+
+    /**
+     * Generates a complete 3X-UI inbound configuration specification for the given port and candidate.
+     */
+    suspend fun generate3xUiInbound(
+        candidate: SniRouteCandidate,
+        port: Int = candidate.targetPort
+    ): ThreeXUiInboundSpec = withContext(dispatchers.io) {
+        val current = subscriptionRepository.observeSelectedConfig().first()
+        val parsed = current?.configUri?.let { profileParser.parseUri(it) }
+        val clientUuid = parsed?.uuidOrPassword ?: java.util.UUID.randomUUID().toString()
+
+        val isTls = CommonProxyPorts.isTlsPort(port)
+        val security = if (isTls) "tls" else "none"
+        val remark = "V2RayOps-VLESS-WS-$port"
+        val wsHost = candidate.wsHost
+        val wsPath = candidate.wsPath
+        val sni = wsHost
+
+        val jsonSnippet = if (isTls) {
+            """
+            {
+              "port": $port,
+              "protocol": "vless",
+              "listen": "0.0.0.0",
+              "tag": "inbound-$port",
+              "settings": {
+                "clients": [
+                  {
+                    "id": "$clientUuid",
+                    "flow": ""
+                  }
+                ],
+                "decryption": "none",
+                "fallbacks": []
+              },
+              "streamSettings": {
+                "network": "ws",
+                "security": "tls",
+                "tlsSettings": {
+                  "serverName": "$sni",
+                  "certificates": []
+                },
+                "wsSettings": {
+                  "path": "$wsPath",
+                  "headers": {
+                    "Host": "$wsHost"
+                  }
+                }
+              },
+              "sniffing": {
+                "enabled": true,
+                "destOverride": ["http", "tls"]
+              }
+            }
+            """.trimIndent()
+        } else {
+            """
+            {
+              "port": $port,
+              "protocol": "vless",
+              "listen": "0.0.0.0",
+              "tag": "inbound-$port",
+              "settings": {
+                "clients": [
+                  {
+                    "id": "$clientUuid",
+                    "flow": ""
+                  }
+                ],
+                "decryption": "none",
+                "fallbacks": []
+              },
+              "streamSettings": {
+                "network": "ws",
+                "security": "none",
+                "wsSettings": {
+                  "path": "$wsPath",
+                  "headers": {
+                    "Host": "$wsHost"
+                  }
+                }
+              },
+              "sniffing": {
+                "enabled": true,
+                "destOverride": ["http", "tls"]
+              }
+            }
+            """.trimIndent()
+        }
+
+        val instructions = listOf(
+            "1. Open 3X-UI Web Panel: https://v2rayops.vpnxhub.com:2083/",
+            "2. Navigate to 'Inbounds' tab -> Click '+ Add Inbound'",
+            "3. Set Remark: '$remark'",
+            "4. Protocol: 'vless' | Listen: '0.0.0.0' | Port: '$port'",
+            "5. Transmission / Network: 'ws' (WebSocket)",
+            "6. Path: '$wsPath'",
+            "7. Header Host: '$wsHost'",
+            if (isTls) "8. Security: 'tls' | SNI: '$sni'" else "8. Security: 'none' (Cleartext HTTP / WS)",
+            "9. Client UUID: '$clientUuid'",
+            "10. Click 'Save' / 'Create' to activate the inbound on port $port!"
+        )
+
+        ThreeXUiInboundSpec(
+            remark = remark,
+            protocol = "vless",
+            port = port,
+            isTls = isTls,
+            security = security,
+            listen = "0.0.0.0",
+            network = "ws",
+            wsPath = wsPath,
+            wsHost = wsHost,
+            sni = sni,
+            clientUuid = clientUuid,
+            panelUrl = "https://v2rayops.vpnxhub.com:2083/",
+            fullJsonSnippet = jsonSnippet,
+            instructions = instructions
+        )
     }
 
     private fun replaceAddressAndPort(rawUri: String, newHost: String, newPort: Int): String {
@@ -672,5 +960,11 @@ class RouteScannerEngine @Inject constructor(
                 "$rawUri$sep$key=$newValue"
             }
         }
+    }
+
+    private fun removeQueryParam(rawUri: String, key: String): String {
+        return rawUri.replace(Regex("""[?&]$key=[^&#]*"""), "")
+            .replace(Regex("""\?&"""), "?")
+            .replace(Regex("""\?$"""), "")
     }
 }

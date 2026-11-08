@@ -111,6 +111,22 @@ class RouteFinderViewModel @Inject constructor(
     private val _speedTestResult = MutableStateFlow<SpeedTestResult?>(null)
     val speedTestResult: StateFlow<SpeedTestResult?> = _speedTestResult.asStateFlow()
 
+    // --- 3X-UI Inbound Guide & Multi-Port State ---
+    private val _selectedInboundCandidate = MutableStateFlow<SniRouteCandidate?>(null)
+    val selectedInboundCandidate: StateFlow<SniRouteCandidate?> = _selectedInboundCandidate.asStateFlow()
+
+    private val _selectedInboundPort = MutableStateFlow(443)
+    val selectedInboundPort: StateFlow<Int> = _selectedInboundPort.asStateFlow()
+
+    private val _inboundSpec = MutableStateFlow<com.v2rayops.client.network.ThreeXUiInboundSpec?>(null)
+    val inboundSpec: StateFlow<com.v2rayops.client.network.ThreeXUiInboundSpec?> = _inboundSpec.asStateFlow()
+
+    private val _isInboundGuideOpen = MutableStateFlow(false)
+    val isInboundGuideOpen: StateFlow<Boolean> = _isInboundGuideOpen.asStateFlow()
+
+    private val _isAuditingPorts = MutableStateFlow(false)
+    val isAuditingPorts: StateFlow<Boolean> = _isAuditingPorts.asStateFlow()
+
     init {
         startScan()
     }
@@ -367,5 +383,71 @@ class RouteFinderViewModel @Inject constructor(
 
     fun setStrategy(strategy: RouteStrategy?) {
         _activeStrategy.value = strategy
+    }
+
+    fun openInboundGuide(candidate: SniRouteCandidate, port: Int = candidate.targetPort) {
+        _selectedInboundCandidate.value = candidate
+        _selectedInboundPort.value = port
+        _isInboundGuideOpen.value = true
+        viewModelScope.launch {
+            _inboundSpec.value = routeScannerEngine.generate3xUiInbound(candidate, port)
+        }
+    }
+
+    fun selectInboundPort(port: Int) {
+        val candidate = _selectedInboundCandidate.value ?: return
+        _selectedInboundPort.value = port
+        viewModelScope.launch {
+            _inboundSpec.value = routeScannerEngine.generate3xUiInbound(candidate, port)
+        }
+    }
+
+    fun closeInboundGuide() {
+        _isInboundGuideOpen.value = false
+        _inboundSpec.value = null
+    }
+
+    fun selectCandidatePort(candidate: SniRouteCandidate, port: Int) {
+        val updated = _candidates.value.map {
+            if (it.domain == candidate.domain && it.strategy == candidate.strategy) {
+                it.copy(targetPort = port)
+            } else it
+        }
+        _candidates.value = updated
+        _statusMessage.value = "Selected port $port for [${candidate.strategy.shortTag}] ${candidate.domain}"
+    }
+
+    fun runFullPortAudit(candidate: SniRouteCandidate) {
+        viewModelScope.launch {
+            _isAuditingPorts.value = true
+            try {
+                val auditResults = routeScannerEngine.auditAllPorts(candidate)
+                val openPorts = auditResults.filter { it.isOpen }.map { it.port }
+                val updated = _candidates.value.map {
+                    if (it.domain == candidate.domain && it.strategy == candidate.strategy) {
+                        it.copy(
+                            verifiedPorts = if (openPorts.isNotEmpty()) openPorts else listOf(candidate.targetPort),
+                            portAuditResults = auditResults
+                        )
+                    } else it
+                }
+                _candidates.value = updated
+                val updatedCandidate = updated.firstOrNull { it.domain == candidate.domain && it.strategy == candidate.strategy }
+                if (updatedCandidate != null) {
+                    _selectedInboundCandidate.value = updatedCandidate
+                    _inboundSpec.value = routeScannerEngine.generate3xUiInbound(updatedCandidate, _selectedInboundPort.value)
+                }
+                _statusMessage.value = "Audited 13 ports for ${candidate.domain}: ${openPorts.size} open ports discovered"
+            } catch (e: Exception) {
+                AppLogger.e("RouteFinderVM", "Port audit failed: ${e.message}")
+            } finally {
+                _isAuditingPorts.value = false
+            }
+        }
+    }
+
+    fun applyPortRoute(candidate: SniRouteCandidate, port: Int) {
+        val tunedCandidate = candidate.copy(targetPort = port)
+        applyCandidate(tunedCandidate)
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,8 +35,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
@@ -62,6 +65,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,10 +88,12 @@ import com.v2rayops.client.designsystem.theme.CyberTextMuted
 import com.v2rayops.client.designsystem.theme.CyberTextPrimary
 import com.v2rayops.client.designsystem.theme.CyberTextSecondary
 import com.v2rayops.client.designsystem.theme.CyberWarning
+import com.v2rayops.client.network.CommonProxyPorts
 import com.v2rayops.client.network.CongestionStressProgress
 import com.v2rayops.client.network.CongestionStressResult
 import com.v2rayops.client.network.Download100MbProgress
 import com.v2rayops.client.network.Download100MbResult
+import com.v2rayops.client.network.PortScanResult
 import com.v2rayops.client.network.RouteStrategy
 import com.v2rayops.client.network.ScanProfile
 import com.v2rayops.client.network.SniCategory
@@ -95,6 +103,7 @@ import com.v2rayops.client.network.SpeedTestPhase
 import com.v2rayops.client.network.SpeedTestProgress
 import com.v2rayops.client.network.SpeedTestResult
 import com.v2rayops.client.network.StabilityProgress
+import com.v2rayops.client.network.ThreeXUiInboundSpec
 import com.v2rayops.client.network.TwoMinuteStabilityResult
 import java.util.Locale
 
@@ -127,6 +136,13 @@ fun RouteFinderScreen(
     val congestionResult by viewModel.congestionResult.collectAsState()
     val speedTestProgress by viewModel.speedTestProgress.collectAsState()
     val speedTestResult by viewModel.speedTestResult.collectAsState()
+
+    // 3X-UI Inbound Guide States
+    val selectedInboundCandidate by viewModel.selectedInboundCandidate.collectAsState()
+    val selectedInboundPort by viewModel.selectedInboundPort.collectAsState()
+    val inboundSpec by viewModel.inboundSpec.collectAsState()
+    val isInboundGuideOpen by viewModel.isInboundGuideOpen.collectAsState()
+    val isAuditingPorts by viewModel.isAuditingPorts.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
 
@@ -600,7 +616,9 @@ fun RouteFinderScreen(
                         candidate = candidate,
                         isApplied = isApplied,
                         onApply = { viewModel.applyCandidate(candidate) },
-                        onBenchmark = { viewModel.openBenchmark(candidate, CandidateBenchmarkType.SPEEDTEST) }
+                        onBenchmark = { viewModel.openBenchmark(candidate, CandidateBenchmarkType.SPEEDTEST) },
+                        onSelectPort = { port -> viewModel.selectCandidatePort(candidate, port) },
+                        onOpenInboundGuide = { viewModel.openInboundGuide(candidate, candidate.targetPort) }
                     )
                 }
 
@@ -676,6 +694,23 @@ fun RouteFinderScreen(
                 onStop = { viewModel.stopActiveBenchmark() },
                 onApplyAndRun = { viewModel.applyAndRunBenchmark(selectedCandidate!!, activeBenchmarkType) },
                 onDismiss = { viewModel.closeBenchmark() }
+            )
+        }
+
+        // 3X-UI Inbound Configuration Modal Dialog
+        if (isInboundGuideOpen && selectedInboundCandidate != null) {
+            ThreeXUiInboundDialog(
+                candidate = selectedInboundCandidate!!,
+                selectedPort = selectedInboundPort,
+                inboundSpec = inboundSpec,
+                isAuditingPorts = isAuditingPorts,
+                onSelectPort = { viewModel.selectInboundPort(it) },
+                onAuditAllPorts = { viewModel.runFullPortAudit(selectedInboundCandidate!!) },
+                onApplyPort = { port ->
+                    viewModel.applyPortRoute(selectedInboundCandidate!!, port)
+                    viewModel.closeInboundGuide()
+                },
+                onDismiss = { viewModel.closeInboundGuide() }
             )
         }
     }
@@ -779,7 +814,9 @@ private fun RouteCandidateCard(
     candidate: SniRouteCandidate,
     isApplied: Boolean,
     onApply: () -> Unit,
-    onBenchmark: () -> Unit
+    onBenchmark: () -> Unit,
+    onSelectPort: (Int) -> Unit,
+    onOpenInboundGuide: () -> Unit
 ) {
     val statusColor = when (candidate.status) {
         SniStatus.WS_READY -> CyberSuccess
@@ -913,11 +950,11 @@ private fun RouteCandidateCard(
 
                 Spacer(modifier = Modifier.height(3.dp))
 
-                // Detail showing address vs SNI routing
+                // Detail showing address vs SNI routing and current target port
                 val routeDetail = if (isAddrSni) {
-                    "Addr: ${candidate.domain}:443 • SNI: ${candidate.sni}"
+                    "Addr: ${candidate.domain}:${candidate.targetPort} • SNI: ${candidate.sni}"
                 } else {
-                    "Addr: ${candidate.targetHost}:443 • SNI: ${candidate.sni}"
+                    "Addr: ${candidate.targetHost}:${candidate.targetPort} • SNI: ${candidate.sni}"
                 }
 
                 Text(
@@ -927,15 +964,97 @@ private fun RouteCandidateCard(
                     color = CyberTextMuted,
                     maxLines = 1
                 )
+
+                // Discovered Ports row
+                if (candidate.verifiedPorts.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "PORTS:",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextMuted
+                        )
+                        candidate.verifiedPorts.forEach { port ->
+                            val isSelected = port == candidate.targetPort
+                            val isTls = CommonProxyPorts.isTlsPort(port)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(if (isSelected) CyberAccent.copy(alpha = 0.25f) else CyberBackground)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSelected) CyberAccent else CyberBorderSubtle,
+                                        shape = RoundedCornerShape(3.dp)
+                                    )
+                                    .clickable { onSelectPort(port) }
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isSelected) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(4.dp)
+                                                .clip(CircleShape)
+                                                .background(CyberAccent)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                    }
+                                    Text(
+                                        text = if (isTls) "$port:TLS" else "$port:HTTP",
+                                        fontSize = 8.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (isSelected) CyberAccent else CyberTextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Right: Actions Row [ TEST | APPLY/ACTIVE ]
+            // Right: Actions Row [ 3X-UI | TEST | APPLY/ACTIVE ]
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
+                // 3X-UI Inbound Guide button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(CyberCardElevated)
+                        .border(1.dp, CyberPrimary.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                        .clickable(onClick = onOpenInboundGuide)
+                        .padding(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Dns,
+                            contentDescription = "3X-UI Inbound Guide",
+                            tint = CyberPrimary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "3X-UI",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberPrimary
+                        )
+                    }
+                }
+
                 // Test Route button
                 Box(
                     modifier = Modifier
@@ -943,7 +1062,7 @@ private fun RouteCandidateCard(
                         .background(CyberCardElevated)
                         .border(1.dp, CyberAccent.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
                         .clickable(onClick = onBenchmark)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .padding(horizontal = 7.dp, vertical = 6.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -955,7 +1074,7 @@ private fun RouteCandidateCard(
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = "TEST",
-                            fontSize = 9.sp,
+                            fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
                             color = CyberAccent
@@ -969,7 +1088,7 @@ private fun RouteCandidateCard(
                             .clip(RoundedCornerShape(6.dp))
                             .background(CyberAccent.copy(alpha = 0.2f))
                             .border(1.dp, CyberAccent, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 9.dp, vertical = 6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -978,10 +1097,10 @@ private fun RouteCandidateCard(
                                 tint = CyberAccent,
                                 modifier = Modifier.size(12.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
                                 text = "ACTIVE",
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
                                 color = CyberAccent
@@ -1000,11 +1119,11 @@ private fun RouteCandidateCard(
                                 shape = RoundedCornerShape(6.dp)
                             )
                             .clickable(enabled = isUsable, onClick = onApply)
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 9.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = "APPLY",
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
                             color = if (isUsable) CyberTextPrimary else CyberTextMuted
@@ -1521,4 +1640,499 @@ private fun CandidateBenchmarkDialog(
             }
         }
     )
+}
+
+@Composable
+private fun ThreeXUiInboundDialog(
+    candidate: SniRouteCandidate,
+    selectedPort: Int,
+    inboundSpec: ThreeXUiInboundSpec?,
+    isAuditingPorts: Boolean,
+    onSelectPort: (Int) -> Unit,
+    onAuditAllPorts: () -> Unit,
+    onApplyPort: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val clipboardManager = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
+    var copiedNotice by remember { mutableStateOf<String?>(null) }
+    val isTls = CommonProxyPorts.isTlsPort(selectedPort)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CyberBackground,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Dns,
+                        contentDescription = null,
+                        tint = CyberPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "3X-UI INBOUND GUIDE",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isTls) CyberSuccess.copy(alpha = 0.2f) else CyberWarning.copy(alpha = 0.2f))
+                        .border(1.dp, if (isTls) CyberSuccess else CyberWarning, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (isTls) "PORT $selectedPort (TLS)" else "PORT $selectedPort (HTTP / CLEARTEXT)",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isTls) CyberSuccess else CyberWarning
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Copied notice banner
+                if (copiedNotice != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(CyberAccent.copy(alpha = 0.2f))
+                            .border(1.dp, CyberAccent, RoundedCornerShape(4.dp))
+                            .padding(6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = copiedNotice ?: "",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = CyberAccent
+                        )
+                    }
+                }
+
+                // Node & Strategy Context Card
+                CyberCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    padding = 8.dp,
+                    backgroundColor = CyberCard
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "BUG HOST / DOMAIN",
+                                fontSize = 7.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextMuted
+                            )
+                            Text(
+                                text = candidate.domain,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "ROUTING MODE",
+                                fontSize = 7.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextMuted
+                            )
+                            Text(
+                                text = candidate.strategy.displayName,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberAccent
+                            )
+                        }
+                    }
+                }
+
+                // Port Selector Bar
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "SELECT PORT TO ALLOW IN 3X-UI:",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextSecondary
+                        )
+
+                        // Audit all ports button
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(CyberCardElevated)
+                                .border(1.dp, CyberPrimary.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                .clickable(enabled = !isAuditingPorts, onClick = onAuditAllPorts)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isAuditingPorts) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(8.dp),
+                                        color = CyberAccent,
+                                        strokeWidth = 1.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "AUDITING...",
+                                        fontSize = 7.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = CyberAccent
+                                    )
+                                } else {
+                                    Text(
+                                        text = "AUDIT ALL 13 PORTS",
+                                        fontSize = 7.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = CyberPrimary
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Horizontal row of discovered + common ports
+                    val displayPorts = (candidate.verifiedPorts + CommonProxyPorts.QUICK_MULTI_PORTS).distinct().sorted()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        displayPorts.forEach { p ->
+                            val isSelected = p == selectedPort
+                            val pTls = CommonProxyPorts.isTlsPort(p)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isSelected) CyberPrimary else CyberCard)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSelected) CyberAccent else CyberBorderSubtle,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .clickable { onSelectPort(p) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = p.toString(),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (isSelected) Color.White else CyberTextPrimary
+                                    )
+                                    Text(
+                                        text = if (pTls) "TLS" else "HTTP",
+                                        fontSize = 6.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (isSelected) CyberAccent else CyberTextMuted
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3X-UI Form Fields Table
+                if (inboundSpec != null) {
+                    CyberCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        padding = 10.dp,
+                        backgroundColor = CyberCard
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "3X-UI WEB INBOUND PARAMETERS",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberAccent
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            InboundFieldRow("Remark", inboundSpec.remark) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.remark))
+                                copiedNotice = "Copied Remark: ${inboundSpec.remark}"
+                            }
+                            InboundFieldRow("Protocol", inboundSpec.protocol) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.protocol))
+                                copiedNotice = "Copied Protocol: ${inboundSpec.protocol}"
+                            }
+                            InboundFieldRow("Listening IP", inboundSpec.listen) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.listen))
+                                copiedNotice = "Copied Listening IP"
+                            }
+                            InboundFieldRow("Port", inboundSpec.port.toString()) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.port.toString()))
+                                copiedNotice = "Copied Port: ${inboundSpec.port}"
+                            }
+                            InboundFieldRow("Transmission", inboundSpec.network) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.network))
+                                copiedNotice = "Copied Transmission: ${inboundSpec.network}"
+                            }
+                            InboundFieldRow("WS Path", inboundSpec.wsPath) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.wsPath))
+                                copiedNotice = "Copied Path: ${inboundSpec.wsPath}"
+                            }
+                            InboundFieldRow("WS Header (Host)", inboundSpec.wsHost) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.wsHost))
+                                copiedNotice = "Copied Host: ${inboundSpec.wsHost}"
+                            }
+                            InboundFieldRow("Security", inboundSpec.security) {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.security))
+                                copiedNotice = "Copied Security: ${inboundSpec.security}"
+                            }
+                            if (inboundSpec.isTls) {
+                                InboundFieldRow("TLS SNI", inboundSpec.sni) {
+                                    clipboardManager.setText(AnnotatedString(inboundSpec.sni))
+                                    copiedNotice = "Copied SNI: ${inboundSpec.sni}"
+                                }
+                            }
+                            InboundFieldRow("Client UUID", inboundSpec.clientUuid.take(16) + "...") {
+                                clipboardManager.setText(AnnotatedString(inboundSpec.clientUuid))
+                                copiedNotice = "Copied Client UUID"
+                            }
+                        }
+                    }
+
+                    // Step-by-Step Instructions Card
+                    CyberCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        padding = 10.dp,
+                        backgroundColor = CyberCard
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = "HOW TO CONFIGURE IN 3X-UI PANEL",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberPrimary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            inboundSpec.instructions.forEach { step ->
+                                Text(
+                                    text = step,
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberTextSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    // Raw JSON Snippet Card
+                    CyberCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        padding = 10.dp,
+                        backgroundColor = CyberBackground
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "INBOUND JSON CONFIGURATION",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberTextMuted
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(CyberCardElevated)
+                                        .border(1.dp, CyberBorderSubtle, RoundedCornerShape(3.dp))
+                                        .clickable {
+                                            clipboardManager.setText(AnnotatedString(inboundSpec.fullJsonSnippet))
+                                            copiedNotice = "Copied Full Inbound JSON"
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = null,
+                                            tint = CyberAccent,
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = "COPY JSON",
+                                            fontSize = 7.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = CyberAccent
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = inboundSpec.fullJsonSnippet,
+                                fontSize = 7.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onApplyPort(selectedPort) },
+                colors = ButtonDefaults.buttonColors(containerColor = CyberAccent)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Bolt,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = Color.Black
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "APPLY PORT $selectedPort TO APP",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.Black
+                )
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (inboundSpec != null) {
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(inboundSpec.summaryText))
+                            copiedNotice = "Copied 3X-UI Specification Summary"
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = null,
+                            tint = CyberTextSecondary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "COPY SPECS",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextSecondary
+                        )
+                    }
+
+                    TextButton(
+                        onClick = {
+                            try {
+                                uriHandler.openUri(inboundSpec.panelUrl)
+                            } catch (_: Exception) {}
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInBrowser,
+                            contentDescription = null,
+                            tint = CyberPrimary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "OPEN 3X-UI",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberPrimary
+                        )
+                    }
+                }
+
+                TextButton(onClick = onDismiss) {
+                    Text(
+                        text = "CLOSE",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextMuted
+                    )
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun InboundFieldRow(
+    label: String,
+    value: String,
+    onCopy: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onCopy)
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontSize = 8.sp,
+            fontFamily = FontFamily.Monospace,
+            color = CyberTextMuted
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = value,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = CyberTextPrimary
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = "Copy $label",
+                tint = CyberTextMuted,
+                modifier = Modifier.size(10.dp)
+            )
+        }
+    }
 }
