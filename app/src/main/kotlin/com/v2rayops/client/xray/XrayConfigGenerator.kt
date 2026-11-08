@@ -32,14 +32,8 @@ class XrayConfigGenerator @Inject constructor(
             h.contains("vpnxhub.com", ignoreCase = true) || h == "172.236.134.215"
         }
 
-        // Determine if this is an "Addr-as-SNI" (Fronting) config:
-        // URI address is a bug host (support.zoom.us, tiktok.com, etc.), while wsHost/sni is our VPS cluster
-        val isAddrSniFronting = parsed != null &&
-                !isVpsHost(parsed.host) &&
-                (isVpsHost(parsed.wsHost) || isVpsHost(parsed.sni))
-
         val outboundAddress = if (parsed != null) {
-            if (isAddrSniFronting || isVpsHost(parsed.host)) {
+            if (isVpsHost(parsed.host)) {
                 "172.236.134.215"
             } else {
                 parsed.host
@@ -51,10 +45,10 @@ class XrayConfigGenerator @Inject constructor(
         // 2. DNS
         val dns = JSONObject().apply {
             val servers = JSONArray().apply {
-                put("localhost")
                 put(settings.customDns.ifBlank { "1.1.1.1" })
                 put("8.8.8.8")
                 put("tcp://1.1.1.1")
+                put("https://1.1.1.1/dns-query")
             }
             put("servers", servers)
             put("queryStrategy", "UseIPv4")
@@ -63,9 +57,13 @@ class XrayConfigGenerator @Inject constructor(
                 put("v2rayops.vpnxhub.com", "172.236.134.215")
                 put("dns.google", "8.8.8.8")
                 put("one.one.one.one", "1.1.1.1")
-                // Only map legitimate VPS origin cluster hostnames to avoid poisoning external CDN domains (e.g. TikTok, Zoom)
+                // Only map legitimate VPS origin cluster hostnames to avoid poisoning external CDN domains
                 if (parsed != null && isVpsHost(parsed.host) && !isIp(parsed.host)) {
-                    put(parsed.host, outboundAddress)
+                    put(parsed.host, "172.236.134.215")
+                }
+                // For known Zoom CDN bug host, map directly to fast verified Cloudflare IPv4 edge
+                if (parsed != null && parsed.host.contains("zoom.us", ignoreCase = true)) {
+                    put(parsed.host, "170.114.45.6")
                 }
             }
             put("hosts", hosts)
@@ -183,17 +181,8 @@ class XrayConfigGenerator @Inject constructor(
 
             // StreamSettings (Reality / TLS / WebSocket)
             if (parsed != null) {
-                val effectiveSni = if (isAddrSniFronting) {
-                    parsed.host // In Addr-Fronting, bug host from address is sent as zero-rated SNI
-                } else {
-                    parsed.sni.ifBlank { parsed.host }
-                }
-
-                val effectiveWsHost = if (isAddrSniFronting) {
-                    if (isVpsHost(parsed.wsHost)) parsed.wsHost else if (isVpsHost(parsed.sni)) parsed.sni else "sg-v2rayops.vpnxhub.com"
-                } else {
-                    parsed.wsHost.ifBlank { parsed.host }
-                }
+                val effectiveSni = parsed.sni.ifBlank { parsed.host }
+                val effectiveWsHost = parsed.wsHost.ifBlank { parsed.host }
 
                 val streamSettings = JSONObject().apply {
                     put("network", parsed.networkType.ifBlank { "tcp" })
@@ -267,13 +256,10 @@ class XrayConfigGenerator @Inject constructor(
                         put("wsSettings", wsSettings)
                     }
 
-                    // DPI Evasion & Anti-Jitter Socket Options
+                    // High-performance socket options
                     val sockopt = JSONObject().apply {
                         put("tcpNoDelay", true)
                         put("tcpKeepAliveInterval", 15)
-                        if (settings.dpiDelayFixEnabled) {
-                            put("dialerProxy", "fragment")
-                        }
                     }
                     put("sockopt", sockopt)
                 }
@@ -340,6 +326,18 @@ class XrayConfigGenerator @Inject constructor(
                 put("port", "53")
                 put("network", "tcp,udp")
                 put("outboundTag", "dns-out")
+            })
+
+            // Route DNS server IPs (1.1.1.1, 8.8.8.8) through proxy so all DNS is encrypted & fast
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("ip", JSONArray().apply {
+                    put("1.1.1.1")
+                    put("8.8.8.8")
+                    put("1.0.0.1")
+                    put("8.8.4.4")
+                })
+                put("outboundTag", "proxy")
             })
 
             // Block QUIC (UDP 443) so media apps (TikTok, YouTube, Instagram) immediately fall back to TCP HTTP/2

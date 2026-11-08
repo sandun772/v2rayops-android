@@ -260,17 +260,18 @@ class NetworkOptimizerEngine @Inject constructor(
     }
 
     suspend fun applyOptimizedSettings(report: NetworkOptimizationReport) = withContext(dispatchers.io) {
-        AppLogger.i(TAG, "Applying network-tuned configuration: DNS=${report.optimalDns}, MTU=${report.optimalMtu}, Buffer=${report.optimalBufferSizeKb}KB, DPI Delay Fix=true")
+        AppLogger.i(TAG, "Applying network-tuned configuration: DNS=${report.optimalDns}, MTU=${report.optimalMtu}, Buffer=${report.optimalBufferSizeKb}KB, SmartQoS=true")
         settingsRepository.setCustomDns(report.optimalDns)
         settingsRepository.setCellularMtuOptimized(report.optimalMtu <= 1400)
         settingsRepository.setSmartQoSEnabled(true)
         settingsRepository.setTcpBufferSizeKb(report.optimalBufferSizeKb)
-        settingsRepository.setDpiDelayFixEnabled(true)
+        // Keep dpiDelayFixEnabled disabled by default; artificial fragmentation disrupts zero-rated carrier middleboxes
+        settingsRepository.setDpiDelayFixEnabled(false)
 
         // Smooth tunnel reload if VPN is currently connected
         if (vpnManager.connectionState.value.isConnected) {
-            AppLogger.i(TAG, "VPN is active: reconnecting with active DPI fragmentation & MTU tuning")
-            // Reconnecting seamlessly reloads with tuned DPI fragmentation & buffer
+            AppLogger.i(TAG, "VPN is active: reconnecting with active network optimizations & MTU tuning")
+            // Reconnecting seamlessly reloads with tuned parameters & buffer
         }
     }
 }

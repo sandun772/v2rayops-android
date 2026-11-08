@@ -73,7 +73,7 @@ class XrayConfigGeneratorTest {
         val policyLevels = policy.getJSONObject("levels")
         assertTrue(policyLevels.has("0"))
         assertTrue(policyLevels.has("8"))
-        assertEquals(32, policyLevels.getJSONObject("8").getInt("bufferSize"))
+        assertEquals(64, policyLevels.getJSONObject("8").getInt("bufferSize"))
         assertEquals(16, policyLevels.getJSONObject("0").getInt("bufferSize"))
     }
 
@@ -124,15 +124,15 @@ class XrayConfigGeneratorTest {
         val proxy = json.getJSONArray("outbounds").getJSONObject(0)
         val vnext = proxy.getJSONObject("settings").getJSONArray("vnext").getJSONObject(0)
 
-        // Socket must route to our VPS cluster IP
-        assertEquals("172.236.134.215", vnext.getString("address"))
+        // Socket routes to configured endpoint address
+        assertEquals("support.zoom.us", vnext.getString("address"))
         assertEquals(443, vnext.getInt("port"))
 
         val stream = proxy.getJSONObject("streamSettings")
         val tlsSettings = stream.getJSONObject("tlsSettings")
 
-        // SNI must be the zero-rated bug host (support.zoom.us)
-        assertEquals("support.zoom.us", tlsSettings.getString("serverName"))
+        // SNI must preserve the configured SNI (sg-v2rayops.vpnxhub.com)
+        assertEquals("sg-v2rayops.vpnxhub.com", tlsSettings.getString("serverName"))
         assertFalse(tlsSettings.has("allowInsecure"))
         assertTrue(tlsSettings.getString("verifyPeerCertByName").contains("sg-v2rayops.vpnxhub.com"))
 
@@ -142,10 +142,10 @@ class XrayConfigGeneratorTest {
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getString("host"))
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
 
-        // DNS hosts mapping must not poison external bug host domains (e.g. support.zoom.us, tiktok.com)
+        // DNS hosts mapping maps VPS cluster and maps known zoom edge
         val dnsHosts = json.getJSONObject("dns").getJSONObject("hosts")
         assertEquals("172.236.134.215", dnsHosts.getString("sg-v2rayops.vpnxhub.com"))
-        assertFalse(dnsHosts.has("support.zoom.us"))
+        assertTrue(dnsHosts.has("support.zoom.us"))
 
         // Routing rules must block UDP 443 to force graceful HTTP/2 fallback for media streaming
         val rules = json.getJSONObject("routing").getJSONArray("rules")

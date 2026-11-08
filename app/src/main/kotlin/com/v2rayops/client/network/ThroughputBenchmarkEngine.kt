@@ -339,9 +339,9 @@ class ThroughputBenchmarkEngine @Inject constructor(
      * Applies the calculated streaming and throughput optimizations.
      */
     suspend fun applyThroughputOptimizations(report: InAppBenchmarkReport) = withContext(dispatchers.io) {
-        AppLogger.i(TAG, "Applying streaming/throughput optimizations: TCP Buffer=${report.recommendedTcpBufferKb}KB, Headroom=${report.recommendedHeadroomMbps} Mbps, QoS=${report.recommendedQoSEnabled}")
-        settingsRepository.setTcpBufferSizeKb(report.recommendedTcpBufferKb)
-        settingsRepository.setDownloadSpeedLimitMbps(report.recommendedHeadroomMbps)
+        AppLogger.i(TAG, "Applying streaming/throughput optimizations: TCP Buffer=${report.recommendedTcpBufferKb}KB, QoS=${report.recommendedQoSEnabled}")
+        settingsRepository.setTcpBufferSizeKb(report.recommendedTcpBufferKb.coerceAtLeast(64))
+        settingsRepository.setDownloadSpeedLimitMbps(0)
         settingsRepository.setSmartQoSEnabled(report.recommendedQoSEnabled)
     }
 }

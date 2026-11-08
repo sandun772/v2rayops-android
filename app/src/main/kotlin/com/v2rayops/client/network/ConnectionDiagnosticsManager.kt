@@ -276,7 +276,9 @@ class ConnectionDiagnosticsManager @Inject constructor(
             AppLogger.w(TAG, "[Probe-DNS] Failed to resolve $host: ${e.message}")
         }
 
-        val targetIp = dnsIps.firstOrNull() ?: if (host.contains("vpnxhub.com", ignoreCase = true)) "172.236.134.215" else host
+        // Prefer IPv4 addresses for maximum stability on cellular/Wi-Fi CDNs (IPv6 CDNs frequently drop TLS fronting)
+        val ipv4Addresses = dnsIps.filter { !it.contains(":") }
+        val targetIp = ipv4Addresses.firstOrNull() ?: dnsIps.firstOrNull() ?: if (host.contains("vpnxhub.com", ignoreCase = true)) "172.236.134.215" else host
 
         // 2. TCP Socket Connect
         val tcpStart = System.currentTimeMillis()

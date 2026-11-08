@@ -59,8 +59,8 @@ class UserPreferencesDataStore @Inject constructor(
             smartQoSEnabled = preferences[PreferencesKeys.SMART_QOS] ?: true,
             downloadSpeedLimitMbps = preferences[PreferencesKeys.SPEED_LIMIT_MBPS] ?: 0,
             cellularMtuOptimized = preferences[PreferencesKeys.CELLULAR_MTU] ?: true,
-            tcpBufferSizeKb = preferences[PreferencesKeys.TCP_BUFFER_SIZE_KB] ?: 32,
-            dpiDelayFixEnabled = preferences[PreferencesKeys.DPI_DELAY_FIX] ?: true
+            tcpBufferSizeKb = preferences[PreferencesKeys.TCP_BUFFER_SIZE_KB] ?: 64,
+            dpiDelayFixEnabled = preferences[PreferencesKeys.DPI_DELAY_FIX] ?: false
         )
     }
 

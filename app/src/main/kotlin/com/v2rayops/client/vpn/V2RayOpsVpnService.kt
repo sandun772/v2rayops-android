@@ -100,6 +100,15 @@ class V2RayOpsVpnService : VpnService() {
                     .addDnsServer("1.1.1.1")
                     .addDnsServer("8.8.8.8")
 
+                // Add IPv6 dummy ULA address & catch-all route so Android OS routes IPv6 to TUN,
+                // preventing IPv6 leaks and blackholes that cause 10-second carrier timeouts on dual-stack SIMs/Wi-Fi
+                try {
+                    builder.addAddress("fdfe:dcba:9876::1", 126)
+                    builder.addRoute("::", 0)
+                } catch (e: Exception) {
+                    AppLogger.w("V2RayOpsVpnService", "Could not add IPv6 route to TUN: ${e.message}")
+                }
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     builder.setMetered(false)
                 }
