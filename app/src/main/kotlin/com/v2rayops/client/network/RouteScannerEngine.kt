@@ -22,6 +22,8 @@ import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SNIHostName
@@ -177,17 +179,17 @@ class RouteScannerEngine @Inject constructor(
         timeoutMs: Int
     ): SampleProbeResult {
         val startTcp = System.currentTimeMillis()
-        val rawSocket: Socket = try {
+        var rawSocket: Socket? = null
+        var sslSocket: SSLSocket? = null
+        try {
             val s = Socket()
+            s.tcpNoDelay = true
+            s.reuseAddress = true
+            s.setSoLinger(true, 0)
             s.connect(InetSocketAddress(targetHost, port), timeoutMs)
-            s
-        } catch (e: Exception) {
-            val elapsed = System.currentTimeMillis() - startTcp
-            return SampleProbeResult(false, false, elapsed, e.message ?: "TCP timeout")
-        }
+            rawSocket = s
 
-        val startTls = System.currentTimeMillis()
-        val sslSocket: SSLSocket = try {
+            val startTls = System.currentTimeMillis()
             val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
                 override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
@@ -196,62 +198,61 @@ class RouteScannerEngine @Inject constructor(
             val sslContext = SSLContext.getInstance("TLS")
             sslContext.init(null, trustAll, SecureRandom())
 
-            val ssl = sslContext.socketFactory.createSocket(rawSocket, targetHost, port, true) as SSLSocket
+            val ssl = sslContext.socketFactory.createSocket(s, targetHost, port, true) as SSLSocket
+            ssl.tcpNoDelay = true
+            ssl.setSoLinger(true, 0)
             val sslParams = SSLParameters()
             sslParams.serverNames = listOf(SNIHostName(sni))
             ssl.sslParameters = sslParams
             ssl.soTimeout = timeoutMs
 
             ssl.startHandshake()
-            ssl
-        } catch (e: Exception) {
-            try { rawSocket.close() } catch (_: Exception) {}
-            val elapsed = System.currentTimeMillis() - startTls
-            return SampleProbeResult(false, false, elapsed, e.message ?: "TLS handshake timed out")
-        }
+            sslSocket = ssl
+            val tlsLatency = System.currentTimeMillis() - startTls
 
-        val tlsLatency = System.currentTimeMillis() - startTls
-        var wsPassed = false
-        var wsError = ""
-        try {
-            val writer = OutputStreamWriter(sslSocket.outputStream, "UTF-8")
-            val reader = BufferedReader(InputStreamReader(sslSocket.inputStream, "UTF-8"))
+            var wsPassed = false
+            var wsError = ""
+            try {
+                val writer = OutputStreamWriter(ssl.outputStream, "UTF-8")
+                val reader = BufferedReader(InputStreamReader(ssl.inputStream, "UTF-8"))
 
-            val nonce = ByteArray(16)
-            SecureRandom().nextBytes(nonce)
-            val wsKey = Base64.getEncoder().encodeToString(nonce)
-            val request = "GET $wsPath HTTP/1.1\r\n" +
-                    "Host: $wsHost\r\n" +
-                    "Upgrade: websocket\r\n" +
-                    "Connection: Upgrade\r\n" +
-                    "Sec-WebSocket-Key: $wsKey\r\n" +
-                    "Sec-WebSocket-Version: 13\r\n\r\n"
+                val nonce = ByteArray(16)
+                SecureRandom().nextBytes(nonce)
+                val wsKey = Base64.getEncoder().encodeToString(nonce)
+                val request = "GET $wsPath HTTP/1.1\r\n" +
+                        "Host: $wsHost\r\n" +
+                        "Upgrade: websocket\r\n" +
+                        "Connection: Upgrade\r\n" +
+                        "Sec-WebSocket-Key: $wsKey\r\n" +
+                        "Sec-WebSocket-Version: 13\r\n\r\n"
 
-            writer.write(request)
-            writer.flush()
+                writer.write(request)
+                writer.flush()
 
-            val statusLine = reader.readLine()
-            if (statusLine != null && statusLine.contains("101")) {
-                wsPassed = true
+                val statusLine = reader.readLine()
+                if (statusLine != null && statusLine.contains("101")) {
+                    wsPassed = true
+                } else {
+                    wsError = statusLine ?: "No HTTP status response"
+                }
+            } catch (e: Exception) {
+                wsError = e.message ?: "WS upgrade failed"
+            }
+
+            val totalLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(tlsLatency)
+            return if (wsPassed) {
+                SampleProbeResult(true, true, totalLatency, "")
+            } else if (wsError.isNotBlank() && (wsError.contains("400") || wsError.contains("HTTP"))) {
+                SampleProbeResult(true, false, totalLatency, wsError)
             } else {
-                wsError = statusLine ?: "No HTTP status response"
+                SampleProbeResult(false, false, totalLatency, wsError.ifBlank { "Upgrade failed" })
             }
         } catch (e: Exception) {
-            wsError = e.message ?: "WS upgrade failed"
+            val elapsed = System.currentTimeMillis() - startTcp
+            return SampleProbeResult(false, false, elapsed, e.message ?: "Connection failed")
         } finally {
-            try {
-                sslSocket.close()
-                rawSocket.close()
-            } catch (_: Exception) {}
-        }
-
-        val totalLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(tlsLatency)
-        return if (wsPassed) {
-            SampleProbeResult(true, true, totalLatency, "")
-        } else if (wsError.isNotBlank() && (wsError.contains("400") || wsError.contains("HTTP"))) {
-            SampleProbeResult(true, false, totalLatency, wsError)
-        } else {
-            SampleProbeResult(false, false, totalLatency, wsError.ifBlank { "Upgrade failed" })
+            try { sslSocket?.close() } catch (_: Exception) {}
+            try { rawSocket?.close() } catch (_: Exception) {}
         }
     }
 
@@ -349,27 +350,71 @@ class RouteScannerEngine @Inject constructor(
 
     suspend fun scanAll(
         candidates: List<SniRouteCandidate> = DEFAULT_CANDIDATES,
-        profile: ScanProfile = ScanProfile.DEEP_STABILITY,
+        profile: ScanProfile = ScanProfile.QUICK_AUDIT,
         onProgress: (scanned: Int, total: Int, latest: SniRouteCandidate) -> Unit = { _, _, _ -> }
     ): List<SniRouteCandidate> = coroutineScope {
-        val semaphore = Semaphore(3) // Multi-sample stability testing with controlled concurrency to prevent carrier DDoS throttling
+        val semaphore = Semaphore(2) // Controlled concurrency to prevent mobile carrier burst throttling
         val total = candidates.size
+
+        // Deduplicate probes by domain to prevent socket flooding & carrier DPI throttling
+        val uniqueDomains = candidates.map { it.domain }.distinct()
+        val domainResults = ConcurrentHashMap<String, SniRouteCandidate>()
         var scannedCount = 0
 
-        val deferredList = candidates.map { candidate ->
+        val deferredList = uniqueDomains.map { domain ->
+            val sampleCandidate = candidates.first { it.domain == domain }
             async(dispatchers.io) {
                 semaphore.withPermit {
-                    val result = scanCandidate(candidate, profile)
+                    val result = scanCandidate(sampleCandidate, profile)
+                    domainResults[domain] = result
                     synchronized(this@RouteScannerEngine) {
-                        scannedCount++
-                        onProgress(scannedCount, total, result)
+                        val matching = candidates.filter { it.domain == domain }
+                        scannedCount += matching.size
+                        matching.forEach { match ->
+                            onProgress(scannedCount, total, match.copy(
+                                status = result.status,
+                                latencyMs = result.latencyMs,
+                                avgLatencyMs = result.avgLatencyMs,
+                                minLatencyMs = result.minLatencyMs,
+                                maxLatencyMs = result.maxLatencyMs,
+                                jitterMs = result.jitterMs,
+                                samplesCount = result.samplesCount,
+                                successCount = result.successCount,
+                                packetLossPercent = result.packetLossPercent,
+                                stabilityScore = result.stabilityScore,
+                                isSustainedPass = result.isSustainedPass,
+                                errorDetail = result.errorDetail
+                            ))
+                        }
                     }
                     result
                 }
             }
         }
 
-        deferredList.awaitAll().sortedWith(
+        deferredList.awaitAll()
+
+        candidates.map { candidate ->
+            val probe = domainResults[candidate.domain]
+            if (probe != null) {
+                candidate.copy(
+                    status = probe.status,
+                    latencyMs = probe.latencyMs,
+                    avgLatencyMs = probe.avgLatencyMs,
+                    minLatencyMs = probe.minLatencyMs,
+                    maxLatencyMs = probe.maxLatencyMs,
+                    jitterMs = probe.jitterMs,
+                    samplesCount = probe.samplesCount,
+                    successCount = probe.successCount,
+                    packetLossPercent = probe.packetLossPercent,
+                    stabilityScore = probe.stabilityScore,
+                    isSustainedPass = probe.isSustainedPass,
+                    errorDetail = probe.errorDetail
+                )
+            } else {
+                candidate
+            }
+        }.sortedWith(
             compareBy<SniRouteCandidate> {
                 when {
                     it.status == SniStatus.WS_READY && it.stabilityScore >= 80 -> 0 // 1. Top Verified Rock-Solid WS Routes
@@ -396,25 +441,51 @@ class RouteScannerEngine @Inject constructor(
 
         var updatedUri = current.configUri
 
-        if (candidate.strategy == RouteStrategy.ADDR_SNI) {
-            // Strategy 2 (Addr SNI Fronting):
-            // Destination address becomes candidate.domain (e.g. support.zoom.us:443)
-            // SNI becomes VPS domain (sg-v2rayops.vpnxhub.com)
-            // Host becomes VPS domain (sg-v2rayops.vpnxhub.com)
-            // allowInsecure is enabled for zero-rated certificate fronting
-            updatedUri = replaceAddressAndPort(updatedUri, candidate.domain, candidate.targetPort)
-            updatedUri = replaceQueryParam(updatedUri, "sni", candidate.wsHost)
-            updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
-            updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+        if (current.isVmess) {
+            try {
+                val base64Content = updatedUri.removePrefix("vmess://").trim()
+                val jsonStr = String(Base64.getUrlDecoder().decode(base64Content), Charsets.UTF_8)
+                val json = JSONObject(jsonStr)
+
+                if (candidate.strategy == RouteStrategy.ADDR_SNI) {
+                    json.put("add", candidate.domain)
+                    json.put("port", candidate.targetPort)
+                    json.put("sni", candidate.wsHost)
+                    json.put("host", candidate.wsHost)
+                    json.put("insecure", true)
+                } else {
+                    json.put("add", DEFAULT_VPS_DOMAIN)
+                    json.put("port", 443)
+                    json.put("sni", candidate.domain)
+                    json.put("host", candidate.wsHost)
+                    json.put("insecure", true)
+                }
+                val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+                updatedUri = "vmess://$encoded"
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "Failed to update VMess URI: ${e.message}")
+            }
         } else {
-            // Strategy 1 (Standard SNI):
-            // Destination address is VPS IP / domain
-            // SNI becomes candidate.domain
-            // Host remains VPS domain
-            updatedUri = replaceAddressAndPort(updatedUri, DEFAULT_VPS_DOMAIN, 443)
-            updatedUri = replaceQueryParam(updatedUri, "sni", candidate.domain)
-            updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
-            updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+            if (candidate.strategy == RouteStrategy.ADDR_SNI) {
+                // Strategy 2 (Addr SNI Fronting):
+                // Destination address becomes candidate.domain (e.g. support.zoom.us:443)
+                // SNI becomes VPS domain (sg-v2rayops.vpnxhub.com)
+                // Host becomes VPS domain (sg-v2rayops.vpnxhub.com)
+                // allowInsecure is enabled for zero-rated certificate fronting
+                updatedUri = replaceAddressAndPort(updatedUri, candidate.domain, candidate.targetPort)
+                updatedUri = replaceQueryParam(updatedUri, "sni", candidate.wsHost)
+                updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+                updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+            } else {
+                // Strategy 1 (Standard SNI):
+                // Destination address is VPS IP / domain
+                // SNI becomes candidate.domain
+                // Host remains VPS domain
+                updatedUri = replaceAddressAndPort(updatedUri, DEFAULT_VPS_DOMAIN, 443)
+                updatedUri = replaceQueryParam(updatedUri, "sni", candidate.domain)
+                updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+                updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+            }
         }
 
         val parsed = profileParser.parseUri(updatedUri)
@@ -424,10 +495,15 @@ class RouteScannerEngine @Inject constructor(
         val cleanName = current.displayName.substringBefore(" [")
         val updatedConfig = current.copy(
             configUri = updatedUri,
+            host = parsed.host,
+            port = parsed.port,
+            sni = parsed.sni,
+            wsHost = parsed.wsHost,
+            wsPath = parsed.wsPath,
             remark = "$cleanName [$strategyTag: ${candidate.domain}]"
         )
 
-        AppLogger.i(TAG, "Applied winning route [${candidate.strategy.name}] '${candidate.domain}' to config #${updatedConfig.id} (Addr: ${parsed.host}, SNI: ${parsed.sni})")
+        AppLogger.i(TAG, "Applied winning route [${candidate.strategy.name}] '${candidate.domain}' to config #${updatedConfig.id} (Addr: ${updatedConfig.effectiveAddr}, SNI: ${updatedConfig.effectiveSni})")
         subscriptionRepository.selectConfig(updatedConfig)
 
         // If currently running, cleanly reconnect with the newly tuned route

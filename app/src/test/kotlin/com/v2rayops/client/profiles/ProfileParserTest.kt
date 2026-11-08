@@ -92,5 +92,47 @@ class ProfileParserTest {
         assertEquals("sg-v2rayops.vpnxhub.com", profile?.wsHost)
         assertEquals("/v2rayops", profile?.wsPath)
         assertEquals(true, profile?.allowInsecure)
+
+        // Verify VpnConfig model behavior with this parsed profile
+        val config = com.v2rayops.client.domain.model.VpnConfig(
+            id = 100,
+            protocol = profile!!.protocol,
+            configUri = uri,
+            serverId = 1,
+            status = "active",
+            host = profile.host,
+            port = profile.port,
+            sni = profile.sni,
+            wsHost = profile.wsHost,
+            wsPath = profile.wsPath
+        )
+
+        org.junit.Assert.assertTrue("Should identify as Addr-Fronting", config.isAddrFronting)
+        assertEquals("support.zoom.us:443", config.effectiveAddr)
+        assertEquals("sg-v2rayops.vpnxhub.com", config.effectiveSni)
+    }
+
+    @Test
+    fun vpnConfig_withStandardSni_evaluatesAddrAndSniCleanly() {
+        val uri = "vless://418d98af-55cf-4d90-be78-27e483d12c83@sg-v2rayops.vpnxhub.com:443?encryption=none&security=tls&sni=microsoft.com&allowInsecure=true&fp=chrome&type=ws&host=sg-v2rayops.vpnxhub.com&path=/v2rayops#Sandun"
+        val profile = parser.parseUri(uri)
+        assertNotNull(profile)
+
+        val config = com.v2rayops.client.domain.model.VpnConfig(
+            id = 101,
+            protocol = profile!!.protocol,
+            configUri = uri,
+            serverId = 1,
+            status = "active",
+            host = profile.host,
+            port = profile.port,
+            sni = profile.sni,
+            wsHost = profile.wsHost,
+            wsPath = profile.wsPath
+        )
+
+        org.junit.Assert.assertFalse("Should NOT identify as Addr-Fronting", config.isAddrFronting)
+        assertEquals("sg-v2rayops.vpnxhub.com:443", config.effectiveAddr)
+        assertEquals("microsoft.com", config.effectiveSni)
     }
 }

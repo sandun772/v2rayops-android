@@ -58,7 +58,10 @@ class SubscriptionRepositoryImpl @Inject constructor(
                         expiresAt = if (obj.has("expiresAt") && !obj.isNull("expiresAt")) obj.getString("expiresAt") else null,
                         serverName = obj.optString("serverName", "V2RayOps Singapore"),
                         serverCountry = obj.optString("serverCountry", "SG"),
-                        serverFlag = obj.optString("serverFlag", "🇸🇬")
+                        serverFlag = obj.optString("serverFlag", "SG"),
+                        sni = obj.optString("sni", parsed?.sni ?: ""),
+                        wsHost = obj.optString("wsHost", parsed?.wsHost ?: ""),
+                        wsPath = obj.optString("wsPath", parsed?.wsPath ?: "")
                     )
                 )
             }
@@ -93,6 +96,9 @@ class SubscriptionRepositoryImpl @Inject constructor(
                     put("serverName", c.serverName)
                     put("serverCountry", c.serverCountry)
                     put("serverFlag", c.serverFlag)
+                    put("sni", c.sni)
+                    put("wsHost", c.wsHost)
+                    put("wsPath", c.wsPath)
                 }
                 array.put(obj)
             }
@@ -107,9 +113,17 @@ class SubscriptionRepositoryImpl @Inject constructor(
     override fun observeSelectedConfig(): Flow<VpnConfig?> = _selectedConfig.asStateFlow()
 
     override fun selectConfig(config: VpnConfig) {
+        val currentList = _configs.value
+        val updatedList = if (currentList.any { it.id == config.id }) {
+            currentList.map { if (it.id == config.id) config else it }
+        } else {
+            listOf(config) + currentList
+        }
+        _configs.value = updatedList
         _selectedConfig.value = config
         secureStore.saveSelectedConfigId(config.id)
-        AppLogger.i("SubscriptionRepository", "Selected active config: ${config.displayName}")
+        saveConfigsToCache(updatedList)
+        AppLogger.i("SubscriptionRepository", "Selected active config: ${config.displayName} (addr: ${config.effectiveAddr}, sni: ${config.effectiveSni})")
     }
 
     override fun importManualConfig(rawUri: String): AppResult<VpnConfig> {
@@ -135,7 +149,10 @@ class SubscriptionRepositoryImpl @Inject constructor(
             expiresAt = null,
             serverName = "Custom (${parsed.host})",
             serverCountry = "SG",
-            serverFlag = "⚡"
+            serverFlag = "CUSTOM",
+            sni = parsed.sni,
+            wsHost = parsed.wsHost,
+            wsPath = parsed.wsPath
         )
 
         val current = _configs.value.toMutableList()
@@ -182,7 +199,10 @@ class SubscriptionRepositoryImpl @Inject constructor(
                             expiresAt = dto.expiresAt,
                             serverName = dto.serverName ?: "",
                             serverCountry = dto.serverCountry ?: "SG",
-                            serverFlag = dto.serverFlag ?: "🇸🇬"
+                            serverFlag = dto.serverFlag ?: "SG",
+                            sni = parsed?.sni ?: "",
+                            wsHost = parsed?.wsHost ?: "",
+                            wsPath = parsed?.wsPath ?: ""
                         )
                     }
 

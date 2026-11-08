@@ -142,8 +142,20 @@ class XrayConfigGeneratorTest {
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getString("host"))
         assertEquals("sg-v2rayops.vpnxhub.com", wsSettings.getJSONObject("headers").getString("Host"))
 
-        // DNS hosts mapping must pre-resolve support.zoom.us to avoid DNS timeouts
+        // DNS hosts mapping must not poison external bug host domains (e.g. support.zoom.us, tiktok.com)
         val dnsHosts = json.getJSONObject("dns").getJSONObject("hosts")
-        assertEquals("172.236.134.215", dnsHosts.getString("support.zoom.us"))
+        assertEquals("172.236.134.215", dnsHosts.getString("sg-v2rayops.vpnxhub.com"))
+        assertFalse(dnsHosts.has("support.zoom.us"))
+
+        // Routing rules must block UDP 443 to force graceful HTTP/2 fallback for media streaming
+        val rules = json.getJSONObject("routing").getJSONArray("rules")
+        var quicBlocked = false
+        for (i in 0 until rules.length()) {
+            val r = rules.getJSONObject(i)
+            if (r.optString("port") == "443" && r.optString("network") == "udp" && r.optString("outboundTag") == "block") {
+                quicBlocked = true
+            }
+        }
+        assertTrue("QUIC UDP 443 must be blocked in routing rules", quicBlocked)
     }
 }

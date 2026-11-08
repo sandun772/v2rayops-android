@@ -40,7 +40,7 @@ class RouteFinderViewModel @Inject constructor(
     private val _activeStrategy = MutableStateFlow<RouteStrategy?>(null)
     val activeStrategy: StateFlow<RouteStrategy?> = _activeStrategy.asStateFlow()
 
-    private val _activeScanProfile = MutableStateFlow<ScanProfile>(ScanProfile.DEEP_STABILITY)
+    private val _activeScanProfile = MutableStateFlow<ScanProfile>(ScanProfile.QUICK_AUDIT)
     val activeScanProfile: StateFlow<ScanProfile> = _activeScanProfile.asStateFlow()
 
     private val _appliedRouteKey = MutableStateFlow<String?>(null)

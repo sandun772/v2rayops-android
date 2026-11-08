@@ -13,7 +13,10 @@ data class VpnConfig(
     val expiresAt: String? = null,
     val serverName: String = "",
     val serverCountry: String = "",
-    val serverFlag: String = ""
+    val serverFlag: String = "",
+    val sni: String = "",
+    val wsHost: String = "",
+    val wsPath: String = ""
 ) {
     val isVless: Boolean get() = protocol.equals("vless", ignoreCase = true)
     val isVmess: Boolean get() = protocol.equals("vmess", ignoreCase = true)
@@ -32,6 +35,7 @@ data class VpnConfig(
 
     val activeSni: String
         get() {
+            if (sni.isNotBlank()) return sni
             val regex = Regex("""[?&]sni=([^&#]*)""")
             val match = regex.find(configUri)
             val sniParam = match?.groupValues?.get(1)?.let {
@@ -41,15 +45,17 @@ data class VpnConfig(
         }
 
     val isAddrFronting: Boolean
-        get() = !isVpsHost && (configUri.contains("vpnxhub.com", ignoreCase = true) || configUri.contains("172.236.134.215"))
+        get() = !isVpsHost && (
+            wsHost.contains("vpnxhub.com", ignoreCase = true) ||
+            wsHost == "172.236.134.215" ||
+            sni.contains("vpnxhub.com", ignoreCase = true) ||
+            configUri.contains("vpnxhub.com", ignoreCase = true) ||
+            configUri.contains("172.236.134.215")
+        )
 
     val effectiveAddr: String
         get() = if (host.isNotBlank()) "$host:$port" else "sg-v2rayops.vpnxhub.com:443"
 
     val effectiveSni: String
-        get() = if (isAddrFronting) {
-            host.ifBlank { activeSni }
-        } else {
-            activeSni
-        }
+        get() = activeSni.ifBlank { host.ifBlank { "sg-v2rayops.vpnxhub.com" } }
 }

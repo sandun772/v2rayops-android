@@ -63,7 +63,8 @@ class XrayConfigGenerator @Inject constructor(
                 put("v2rayops.vpnxhub.com", "172.236.134.215")
                 put("dns.google", "8.8.8.8")
                 put("one.one.one.one", "1.1.1.1")
-                if (parsed != null && parsed.host.isNotBlank() && !isIp(parsed.host)) {
+                // Only map legitimate VPS origin cluster hostnames to avoid poisoning external CDN domains (e.g. TikTok, Zoom)
+                if (parsed != null && isVpsHost(parsed.host) && !isIp(parsed.host)) {
                     put(parsed.host, outboundAddress)
                 }
             }
@@ -89,7 +90,6 @@ class XrayConfigGenerator @Inject constructor(
                     put("destOverride", JSONArray().apply {
                         put("http")
                         put("tls")
-                        put("quic")
                     })
                     put("routeOnly", true)
                 })
@@ -111,7 +111,6 @@ class XrayConfigGenerator @Inject constructor(
                     put("destOverride", JSONArray().apply {
                         put("http")
                         put("tls")
-                        put("quic")
                     })
                 })
             })
@@ -341,6 +340,14 @@ class XrayConfigGenerator @Inject constructor(
                 put("port", "53")
                 put("network", "tcp,udp")
                 put("outboundTag", "dns-out")
+            })
+
+            // Block QUIC (UDP 443) so media apps (TikTok, YouTube, Instagram) immediately fall back to TCP HTTP/2
+            rules.put(JSONObject().apply {
+                put("type", "field")
+                put("port", "443")
+                put("network", "udp")
+                put("outboundTag", "block")
             })
 
             // Bypass Private LAN
