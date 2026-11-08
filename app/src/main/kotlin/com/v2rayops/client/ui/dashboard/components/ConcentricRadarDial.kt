@@ -45,11 +45,12 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Concentric Radar Dial matching the exact mockups:
- * - 7 Concentric rings of circular dots with smooth radial brightness falloff
- * - 2 High-tech dashed circular orbital tracks (NO device icons, clean orbital radar lines)
- * - Matte flat obsidian center power button (140dp) with razor-sharp solid color border
- * - Luminous power icon and clean monospace action text (CONNECT / CANCEL / STOP)
+ * Concentric Radar Dial matching reference design:
+ * - 5 Concentric rings of dots clustered as a halo around the 130dp center button (ending at ~106dp radius)
+ * - Clean dark space between the dots and orbit circles (ZERO overlap!)
+ * - 2 High-tech dashed circular orbital tracks positioned outside the dot field (inner at ~132dp, outer at ~156dp)
+ * - Flat matte obsidian center power button (130dp) with razor-sharp 2dp border
+ * - Luminous power icon and monospace action text (CONNECT / CANCEL / STOP)
  */
 @Composable
 fun ConcentricRadarDial(
@@ -73,7 +74,7 @@ fun ConcentricRadarDial(
     val disconnectedIcon = Color(0xFF6B7A99)    // Muted Steel Slate
     val disconnectedDot = Color(0xFF1E283D)
 
-    // Smoothly animated transition between states (no sudden popping)
+    // Smoothly animated transition between states
     val targetBorder = when {
         isConnected -> connectedBorder
         isConnecting -> connectingBorder
@@ -128,7 +129,7 @@ fun ConcentricRadarDial(
     val infiniteTransition = rememberInfiniteTransition(label = "RadarMotion")
 
     val breathMultiplier by infiniteTransition.animateFloat(
-        initialValue = 0.88f,
+        initialValue = 0.90f,
         targetValue = 1.08f,
         animationSpec = infiniteRepeatable(
             animation = tween(3400, easing = FastOutSlowInEasing),
@@ -154,31 +155,34 @@ fun ConcentricRadarDial(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 284dp Radar Field Container
+        // 320dp Radar Field Container
         Box(
             modifier = Modifier
-                .size(284.dp)
+                .size(320.dp)
                 .drawBehind {
                     val cx = size.width / 2f
                     val cy = size.height / 2f
 
-                    // 7 Concentric Rings of Dots wrapping outwards from the 140dp button
+                    // Center button radius = 65dp (130dp diameter)
+                    val buttonRadius = 65.dp.toPx()
+
+                    // 5 Concentric Rings of Dots clustered tightly around the button (from 72dp to 106dp)
+                    // Exactly matching reference: R0 * 1.11, 1.27, 1.41, 1.54, 1.63
                     val dotRadii = listOf(
-                        size.minDimension * 0.260f, // Ring 0: ~78dp
-                        size.minDimension * 0.293f, // Ring 1: ~88dp
-                        size.minDimension * 0.326f, // Ring 2: ~98dp
-                        size.minDimension * 0.360f, // Ring 3: ~108dp
-                        size.minDimension * 0.393f, // Ring 4: ~118dp
-                        size.minDimension * 0.426f, // Ring 5: ~128dp
-                        size.minDimension * 0.460f  // Ring 6: ~138dp
+                        buttonRadius * 1.12f, // Ring 0: ~73dp
+                        buttonRadius * 1.26f, // Ring 1: ~82dp
+                        buttonRadius * 1.39f, // Ring 2: ~90dp
+                        buttonRadius * 1.51f, // Ring 3: ~98dp
+                        buttonRadius * 1.63f  // Ring 4: ~106dp
                     )
-                    val dotCounts = listOf(26, 32, 38, 44, 52, 60, 68)
+                    val dotCounts = listOf(24, 30, 36, 42, 48)
 
-                    // 2 Concentric Orbital Track Radii (Dashed lines, NO device satellites)
-                    val orbitInnerRadius = size.minDimension * 0.400f // ~120dp (between ring 4 & 5)
-                    val orbitOuterRadius = size.minDimension * 0.486f // ~146dp (just outside ring 6)
+                    // 2 Concentric Orbital Track Radii (Dashed lines, well outside the dots with clean empty space!)
+                    // Exactly matching reference: R0 * 2.03 and R0 * 2.40
+                    val orbitInnerRadius = buttonRadius * 2.03f // ~132dp (clean gap of ~26dp from outer dots)
+                    val orbitOuterRadius = buttonRadius * 2.40f // ~156dp (outer track)
 
-                    // --- 1. Draw 2 Dashed Orbital Track Circles ---
+                    // --- 1. Draw 2 Dashed Orbital Track Circles in Clean Dark Space ---
                     val orbitColor = when {
                         isConnected -> Color(0xFF2B3356).copy(alpha = 0.55f)
                         isConnecting -> Color(0xFF3E3722).copy(alpha = 0.55f)
@@ -186,7 +190,7 @@ fun ConcentricRadarDial(
                     }
 
                     val dashEffect = PathEffect.dashPathEffect(
-                        floatArrayOf(5.dp.toPx(), 8.dp.toPx()),
+                        floatArrayOf(4.dp.toPx(), 7.dp.toPx()),
                         0f
                     )
 
@@ -203,7 +207,7 @@ fun ConcentricRadarDial(
                         )
                     }
 
-                    // Outer orbit circle (counter-rotating for futuristic sci-fi depth)
+                    // Outer orbit circle (counter-rotating for sci-fi radar depth)
                     rotate(degrees = -orbitRotation * 0.65f, pivot = Offset(cx, cy)) {
                         drawCircle(
                             color = orbitColor.copy(alpha = orbitColor.alpha * 0.85f),
@@ -216,7 +220,7 @@ fun ConcentricRadarDial(
                         )
                     }
 
-                    // --- 2. Draw 7 Concentric Dot Rings ---
+                    // --- 2. Draw 5 Concentric Dot Rings (Gradient Halo fading into dark space) ---
                     val dotRadiusPx = with(density) { 1.25.dp.toPx() }
 
                     for (i in dotRadii.indices) {
@@ -225,25 +229,25 @@ fun ConcentricRadarDial(
                         val angleStep = (2 * Math.PI) / count
                         val normalizedRing = i.toFloat() / (dotRadii.size - 1).toFloat()
 
-                        // Natural radial falloff: inner rings are brighter, outer rings fade smoothly
-                        val baseFalloff = (1f - normalizedRing * 0.72f).coerceIn(0.12f, 1f)
+                        // Natural radial falloff: inner rings are bright, outer rings softly fade to dark
+                        val baseFalloff = (1f - normalizedRing * 0.78f).coerceIn(0.12f, 1f)
 
                         // Staggered cascade wave for state transition
-                        val ringCascade = ((stateProgress - (i * 0.08f)) / 0.50f).coerceIn(0f, 1f)
+                        val ringCascade = ((stateProgress - (i * 0.09f)) / 0.50f).coerceIn(0f, 1f)
 
                         val dotAlpha = when {
                             isConnected -> {
-                                val activeAlpha = 0.72f * baseFalloff * breathMultiplier
+                                val activeAlpha = 0.75f * baseFalloff * breathMultiplier
                                 val idleAlpha = 0.28f * baseFalloff
                                 (idleAlpha + (activeAlpha - idleAlpha) * ringCascade).coerceIn(0.06f, 0.95f)
                             }
                             isConnecting -> {
-                                val activeAlpha = 0.70f * baseFalloff * breathMultiplier
+                                val activeAlpha = 0.72f * baseFalloff * breathMultiplier
                                 val idleAlpha = 0.28f * baseFalloff
                                 (idleAlpha + (activeAlpha - idleAlpha) * ringCascade).coerceIn(0.06f, 0.95f)
                             }
                             else -> {
-                                (0.32f * baseFalloff).coerceIn(0.06f, 0.40f)
+                                (0.34f * baseFalloff).coerceIn(0.06f, 0.40f)
                             }
                         }
 
@@ -262,10 +266,10 @@ fun ConcentricRadarDial(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Center Power Button — Flat Matte Obsidian disc (136dp) with razor-sharp 2dp border
+            // Center Power Button — Flat Matte Obsidian disc (130dp) with razor-sharp 2dp border
             Box(
                 modifier = Modifier
-                    .size(136.dp)
+                    .size(130.dp)
                     .clip(CircleShape)
                     .background(Color(0xFF090C19)) // Clean matte obsidian background
                     .border(
@@ -287,7 +291,7 @@ fun ConcentricRadarDial(
                         imageVector = Icons.Filled.PowerSettingsNew,
                         contentDescription = "Power",
                         tint = animatedIconColor,
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(36.dp)
                     )
                     Spacer(modifier = Modifier.height(7.dp))
                     Text(
