@@ -194,10 +194,16 @@ class OneClickFineTuneManager @Inject constructor(
                 delay(180)
             }
 
-            // Select the winning candidate (lowest latency with WS_READY or TLS_OK)
-            val winner = probedResults
-                .filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+            // Select winning candidate:
+            // For carrier zero-rated packages, STANDARD_SNI guarantees the bug host is in the TLS SNI header
+            // (e.g. SNI: support.zoom.us), satisfying Dialog/Mobitel DPI packet filters.
+            // ADDR_SNI places the bug host as IP destination but leaks the VPS domain in the SNI header,
+            // which causes carrier middlebox drop if user has zero standard internet balance.
+            val passes = probedResults.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+            val winner = passes
+                .filter { it.strategy == RouteStrategy.STANDARD_SNI }
                 .minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
+                ?: passes.minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
                 ?: probedResults.firstOrNull { it.avgLatencyMs > 0 }
                 ?: probedResults.firstOrNull()
                 ?: candidates.first()

@@ -61,11 +61,8 @@ class XrayConfigGenerator @Inject constructor(
                 if (parsed != null && isVpsHost(parsed.host) && !isIp(parsed.host)) {
                     put(parsed.host, "172.236.134.215")
                 }
-                // For known Zoom CDN bug host, map directly to fast verified Cloudflare IPv4 edge
-                if (parsed != null && parsed.host.contains("zoom.us", ignoreCase = true)) {
-                    put(parsed.host, "170.114.45.6")
-                } else if (parsed != null && !isVpsHost(parsed.host) && !isIp(parsed.host)) {
-                    // Pre-resolve bug host domains to IPv4 so Xray dials directly without waiting for DNS
+                // Pre-resolve bug host domains to IPv4 so Xray dials directly without waiting for DNS
+                if (parsed != null && !isVpsHost(parsed.host) && !isIp(parsed.host)) {
                     try {
                         val resolved = java.net.InetAddress.getAllByName(parsed.host)
                         val ipv4 = resolved.firstOrNull { it is java.net.Inet4Address }?.hostAddress
@@ -423,7 +420,7 @@ class XrayConfigGenerator @Inject constructor(
                     put("uplinkOnly", 1)
                     put("downlinkOnly", 1)
                     // Smart QoS: Restrict buffer size to apply TCP sliding window backpressure and mitigate bufferbloat
-                    val bufKb = if (settings.smartQoSEnabled) settings.tcpBufferSizeKb.coerceIn(16, 128) else 64
+                    val bufKb = if (settings.smartQoSEnabled) settings.tcpBufferSizeKb.coerceIn(64, 4096) else 64
                     put("bufferSize", bufKb)
                 }
                 put("8", level8)

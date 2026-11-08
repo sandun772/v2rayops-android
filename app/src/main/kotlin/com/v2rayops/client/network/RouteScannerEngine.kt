@@ -700,12 +700,15 @@ class RouteScannerEngine @Inject constructor(
         }.sortedWith(
             compareBy<SniRouteCandidate> {
                 when {
-                    it.status == SniStatus.WS_READY && it.stabilityScore >= 80 -> 0 // 1. Top Verified Rock-Solid WS Routes
-                    it.status == SniStatus.WS_READY -> 1                           // 2. WS Ready with minor jitter
-                    it.status == SniStatus.TLS_OK && it.stabilityScore >= 80 -> 2  // 3. Stable TLS
-                    it.status == SniStatus.TLS_OK -> 3                             // 4. TLS Pass
-                    it.status == SniStatus.BLOCKED_TIMEOUT -> 4                    // 5. Blocked
-                    else -> 5                                                      // 6. Port closed
+                    it.status == SniStatus.WS_READY && it.strategy == RouteStrategy.STANDARD_SNI && it.stabilityScore >= 80 -> 0 // 1. Top Verified Rock-Solid Standard SNI Routes
+                    it.status == SniStatus.WS_READY && it.stabilityScore >= 80 -> 1                                              // 2. Verified Rock-Solid WS Routes
+                    it.status == SniStatus.WS_READY && it.strategy == RouteStrategy.STANDARD_SNI -> 2                             // 3. WS Ready Standard SNI with minor jitter
+                    it.status == SniStatus.WS_READY -> 3                                                                           // 4. WS Ready Fronting
+                    it.status == SniStatus.TLS_OK && it.strategy == RouteStrategy.STANDARD_SNI && it.stabilityScore >= 80 -> 4   // 5. Stable TLS Standard SNI
+                    it.status == SniStatus.TLS_OK && it.stabilityScore >= 80 -> 5                                                 // 6. Stable TLS
+                    it.status == SniStatus.TLS_OK -> 6                                                                            // 7. TLS Pass
+                    it.status == SniStatus.BLOCKED_TIMEOUT -> 7                                                                   // 8. Blocked
+                    else -> 8                                                                                                     // 9. Port closed
                 }
             }.thenByDescending { it.stabilityScore }
              .thenBy { it.packetLossPercent }
