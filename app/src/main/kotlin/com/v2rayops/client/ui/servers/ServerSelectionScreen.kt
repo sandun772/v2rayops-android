@@ -1,9 +1,5 @@
 package com.v2rayops.client.ui.servers
 
-import android.app.Activity
-import android.net.VpnService
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,11 +22,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -57,40 +54,21 @@ import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
 import com.v2rayops.client.ui.dashboard.components.ClientNavTab
 import com.v2rayops.client.ui.dashboard.components.deriveConfigPackageDetails
-import com.v2rayops.client.ui.servers.components.OneClickFineTuneCard
 
 @Composable
 fun ServerSelectionScreen(
     onBackClick: () -> Unit,
     onNavigateToHome: () -> Unit = onBackClick,
+    onNavigateToFinetune: () -> Unit = {},
     onNavigateToRouting: () -> Unit = {},
     viewModel: ServerSelectionViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
     val configs by viewModel.configs.collectAsState()
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val pingMap by viewModel.pingMap.collectAsState()
     val isTestingAll by viewModel.isTestingAll.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
-    val fineTuneState by viewModel.fineTuneState.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
-
-    val vpnPrepareLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.startOneClickFineTune()
-        }
-    }
-
-    val handleStartFineTune = {
-        val prepareIntent = VpnService.prepare(context)
-        if (prepareIntent != null) {
-            vpnPrepareLauncher.launch(prepareIntent)
-        } else {
-            viewModel.startOneClickFineTune()
-        }
-    }
 
     val filteredConfigs = remember(configs, searchQuery) {
         if (searchQuery.isBlank()) configs
@@ -108,12 +86,12 @@ fun ServerSelectionScreen(
     Scaffold(
         bottomBar = {
             ClientBottomNavBar(
-                selectedTab = ClientNavTab.FINETUNE,
+                selectedTab = ClientNavTab.CONNECT,
                 connectionState = connectionState,
                 onTabSelected = { tab ->
                     when (tab) {
                         ClientNavTab.CONNECT -> onNavigateToHome()
-                        ClientNavTab.FINETUNE -> { /* Already on Finetune */ }
+                        ClientNavTab.FINETUNE -> onNavigateToFinetune()
                         ClientNavTab.TOOLS -> onNavigateToRouting()
                         ClientNavTab.USAGE -> { /* Handled on Dashboard */ }
                         ClientNavTab.SETTINGS -> onBackClick()
@@ -130,20 +108,34 @@ fun ServerSelectionScreen(
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
-            // 1. Top Header Row: "Active Configs" Title + Functional "Test all" Button
+            // 1. Top Header Row: Back Button + "Active Configs" Title + Functional "Test all" Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 12.dp),
+                    .padding(bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "Active Configs",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onBackClick,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Active Configs",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
 
                 // ⏱ Functional Live Edge TCP Socket Test All Button
                 Row(
@@ -190,66 +182,54 @@ fun ServerSelectionScreen(
                 }
             }
 
-            // 2. Scrollable Body: One-Click Auto Fine Tune Card + Search + Assigned Configurations
+            // 2. Search Box [🔍 Search by name, country, protocol]
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF0C101E))
+                    .border(1.dp, Color(0xFF151E34), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "Search",
+                    tint = Color(0xFF64748B),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    textStyle = TextStyle(
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.SansSerif
+                    ),
+                    cursorBrush = SolidColor(Color(0xFF818CF8)),
+                    modifier = Modifier.fillMaxWidth(),
+                    decorationBox = { innerTextField ->
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search by name, country, protocol",
+                                color = Color(0xFF64748B),
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.SansSerif
+                            )
+                        }
+                        innerTextField()
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 3. Node List Section: Assigned Configurations (Profiles)
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Hero: One-Click Full Tuning Auto Card
-                item {
-                    OneClickFineTuneCard(
-                        state = fineTuneState,
-                        selectedConfig = selectedConfig,
-                        onStartFineTune = handleStartFineTune,
-                        onStopFineTune = { viewModel.stopOneClickFineTune() },
-                        onDismissReport = { viewModel.dismissFineTuneReport() }
-                    )
-                }
-
-                // Search Box [🔍 Search by name, country, protocol]
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF0C101E))
-                            .border(1.dp, Color(0xFF151E34), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 14.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Search,
-                            contentDescription = "Search",
-                            tint = Color(0xFF64748B),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        BasicTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            textStyle = TextStyle(
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontFamily = FontFamily.SansSerif
-                            ),
-                            cursorBrush = SolidColor(Color(0xFF818CF8)),
-                            modifier = Modifier.fillMaxWidth(),
-                            decorationBox = { innerTextField ->
-                                if (searchQuery.isEmpty()) {
-                                    Text(
-                                        text = "Search by name, country, protocol",
-                                        color = Color(0xFF64748B),
-                                        fontSize = 13.sp,
-                                        fontFamily = FontFamily.SansSerif
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        )
-                    }
-                }
-
-                // Node List Section: Assigned Configurations Header
                 if (filteredConfigs.isNotEmpty()) {
                     item {
                         Column {
@@ -299,7 +279,7 @@ fun ServerSelectionScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 30.dp),
+                                .padding(vertical = 40.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(

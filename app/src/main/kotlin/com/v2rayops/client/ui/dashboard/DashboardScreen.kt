@@ -116,7 +116,7 @@ fun DashboardScreen(
                             // User is already on home: pressing Connect again connects or disconnects VPN!
                             handleConnectClick()
                         }
-                        ClientNavTab.FINETUNE -> onNavigateToServers()
+                        ClientNavTab.FINETUNE -> onNavigateToOptimizer()
                         ClientNavTab.USAGE -> showUsageCockpit = true
                         ClientNavTab.TOOLS -> onNavigateToRouteFinder()
                         ClientNavTab.SETTINGS -> onNavigateToSettings()

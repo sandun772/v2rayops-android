@@ -88,6 +88,9 @@ fun AppNavGraph(
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
                     }
                 },
+                onNavigateToFinetune = {
+                    navController.navigate(Screen.Optimizer.route)
+                },
                 onNavigateToRouting = {
                     navController.navigate(Screen.RouteFinder.route)
                 }
@@ -128,6 +131,17 @@ fun AppNavGraph(
             NetworkOptimizerScreen(
                 onBackClick = {
                     navController.popBackStack()
+                },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
+                },
+                onNavigateToServers = {
+                    navController.navigate(Screen.ServerSelection.route)
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Screen.Settings.route)
                 },
                 onNavigateToRouteFinder = {
                     navController.navigate(Screen.RouteFinder.route)

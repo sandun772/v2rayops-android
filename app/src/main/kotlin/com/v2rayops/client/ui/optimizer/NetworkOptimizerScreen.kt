@@ -1,5 +1,9 @@
 package com.v2rayops.client.ui.optimizer
 
+import android.app.Activity
+import android.net.VpnService
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -55,6 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -67,11 +72,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
+import com.v2rayops.client.ui.dashboard.components.ClientNavTab
+import com.v2rayops.client.ui.servers.components.OneClickFineTuneCard
 import com.v2rayops.client.designsystem.components.CyberCard
 import com.v2rayops.client.designsystem.components.CyberTopAppBar
 import com.v2rayops.client.designsystem.theme.CyberAccent
@@ -111,9 +120,34 @@ import java.util.Locale
 @Composable
 fun NetworkOptimizerScreen(
     onBackClick: () -> Unit,
+    onNavigateToHome: () -> Unit = onBackClick,
+    onNavigateToServers: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
     onNavigateToRouteFinder: () -> Unit = {},
     viewModel: NetworkOptimizerViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
+    val fineTuneState by viewModel.fineTuneState.collectAsState()
+    val selectedConfig by viewModel.selectedConfig.collectAsState()
+    val connectionState by viewModel.connectionState.collectAsState()
+
+    val vpnPrepareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.startOneClickFineTune()
+        }
+    }
+
+    val handleStartFineTune = {
+        val prepareIntent = VpnService.prepare(context)
+        if (prepareIntent != null) {
+            vpnPrepareLauncher.launch(prepareIntent)
+        } else {
+            viewModel.startOneClickFineTune()
+        }
+    }
+
     val report by viewModel.report.collectAsState()
     val isAnalyzing by viewModel.isAnalyzing.collectAsState()
     val isApplying by viewModel.isApplying.collectAsState()
@@ -137,18 +171,10 @@ fun NetworkOptimizerScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Carrier Audit, 1: Speedtest, 2: Stress & 100MB, 3: Beast Auto-Tune
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CyberBackground)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-        ) {
+    Scaffold(
+        topBar = {
             CyberTopAppBar(
-                title = "NETWORK OPTIMIZER",
+                title = "FINETUNE ENGINE",
                 onBackClick = onBackClick,
                 actions = {
                     val anyActive = isAnalyzing || isTestingDl || isTestingStream || beastState.isRunning ||
@@ -172,6 +198,68 @@ fun NetworkOptimizerScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            ClientBottomNavBar(
+                selectedTab = ClientNavTab.FINETUNE,
+                connectionState = connectionState,
+                onTabSelected = { tab ->
+                    when (tab) {
+                        ClientNavTab.CONNECT -> onNavigateToHome()
+                        ClientNavTab.FINETUNE -> { /* Already on Finetune */ }
+                        ClientNavTab.TOOLS -> onNavigateToRouteFinder()
+                        ClientNavTab.USAGE -> onNavigateToHome()
+                        ClientNavTab.SETTINGS -> onNavigateToSettings()
+                    }
+                }
+            )
+        },
+        containerColor = Color(0xFF050811)
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 16.dp)
+        ) {
+            // --- 0. HERO: ONE-CLICK FULL TUNING AUTO ENGINE ---
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                OneClickFineTuneCard(
+                    state = fineTuneState,
+                    selectedConfig = selectedConfig,
+                    onStartFineTune = handleStartFineTune,
+                    onStopFineTune = { viewModel.stopOneClickFineTune() },
+                    onDismissReport = { viewModel.dismissFineTuneReport() }
+                )
+            }
+
+            // --- 1. Section Header for Granular Controls ---
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Tune,
+                    contentDescription = null,
+                    tint = Color(0xFF64748B),
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "MANUAL DEV CALIBRATION & AUDIT",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF64748B)
+                )
+            }
 
             // 4-Way Tab Selector: [ CARRIER & PMTU | SPEEDTEST | STRESS & 100MB | BEAST AUTO-TUNE ]
             Row(

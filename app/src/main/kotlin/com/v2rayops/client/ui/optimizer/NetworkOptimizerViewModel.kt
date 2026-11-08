@@ -23,12 +23,20 @@ import com.v2rayops.client.network.StabilityProgress
 import com.v2rayops.client.network.StreamingBenchmarkResult
 import com.v2rayops.client.network.ThroughputBenchmarkEngine
 import com.v2rayops.client.network.TwoMinuteStabilityResult
+import com.v2rayops.client.domain.model.ConnectionState
+import com.v2rayops.client.domain.model.VpnConfig
+import com.v2rayops.client.domain.repository.SubscriptionRepository
+import com.v2rayops.client.network.FineTuneState
+import com.v2rayops.client.network.OneClickFineTuneManager
+import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -37,10 +45,32 @@ class NetworkOptimizerViewModel @Inject constructor(
     private val optimizerEngine: NetworkOptimizerEngine,
     private val throughputEngine: ThroughputBenchmarkEngine,
     private val beastOptimizerEngine: BeastOptimizerEngine,
-    private val stressSuiteEngine: NetworkStressSuiteEngine
+    private val stressSuiteEngine: NetworkStressSuiteEngine,
+    private val oneClickFineTuneManager: OneClickFineTuneManager,
+    private val subscriptionRepository: SubscriptionRepository,
+    private val vpnManager: VpnManager
 ) : ViewModel() {
 
+    val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
+    val fineTuneState: StateFlow<FineTuneState> = oneClickFineTuneManager.state
+
+    val selectedConfig: StateFlow<VpnConfig?> = subscriptionRepository.observeSelectedConfig()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     val beastProgressState: StateFlow<BeastProgressState> = beastOptimizerEngine.progressState
+
+    fun startOneClickFineTune() {
+        val target = selectedConfig.value
+        oneClickFineTuneManager.startFineTune(target)
+    }
+
+    fun stopOneClickFineTune() {
+        oneClickFineTuneManager.stopFineTune()
+    }
+
+    fun dismissFineTuneReport() {
+        oneClickFineTuneManager.dismissReport()
+    }
 
     private val _report = MutableStateFlow<NetworkOptimizationReport?>(null)
     val report: StateFlow<NetworkOptimizationReport?> = _report.asStateFlow()
