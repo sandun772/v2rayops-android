@@ -108,9 +108,13 @@ fun DashboardScreen(
         bottomBar = {
             ClientBottomNavBar(
                 selectedTab = ClientNavTab.CONNECT,
+                connectionState = connectionState,
                 onTabSelected = { tab ->
                     when (tab) {
-                        ClientNavTab.CONNECT -> { /* Already on Connect */ }
+                        ClientNavTab.CONNECT -> {
+                            // User is already on home: pressing Connect again connects or disconnects VPN!
+                            handleConnectClick()
+                        }
                         ClientNavTab.FINETUNE -> onNavigateToServers()
                         ClientNavTab.USAGE -> showUsageCockpit = true
                         ClientNavTab.TOOLS -> onNavigateToRouteFinder()

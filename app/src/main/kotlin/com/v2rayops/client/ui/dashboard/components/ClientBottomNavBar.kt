@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.v2rayops.client.domain.model.ConnectionState
 
 enum class ClientNavTab {
     FINETUNE,
@@ -57,14 +58,19 @@ enum class ClientNavTab {
 /**
  * Ultra-minimalist cyber cockpit bottom navigation bar:
  * - Narrow, smooth cubic curved cradle contour along the top edge around the middle connect button
- * - Minimalist obsidian Connect disc with razor-thin luminous indigo border (no clunky blue bubble)
+ * - Minimalist obsidian Connect disc with dynamic visual states mirroring the main connect button:
+ *     * Connected: Luminous Electric Indigo border (#6366F1), periwinkle icon, "Stop" label, ambient glow
+ *     * Connecting: Amber Gold border (#F59E0B), amber icon, "Cancel" label
+ *     * Disconnected: Deep steel slate border (#232E44), slate icon, "Connect" label
+ * - When on Home and tapped again: directly triggers connect/disconnect toggle
  * - Clean, low-noise aesthetic with micro-typography and subtle dot indicators
  */
 @Composable
 fun ClientBottomNavBar(
     selectedTab: ClientNavTab,
     onTabSelected: (ClientNavTab) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    connectionState: ConnectionState = ConnectionState.Disconnected
 ) {
     val density = LocalDensity.current
 
@@ -73,6 +79,16 @@ fun ClientBottomNavBar(
     val curveControlHalfWidthPx = with(density) { 22.dp.toPx() }
     val curveDepthPx = with(density) { 13.dp.toPx() }
     val strokeWidthPx = with(density) { 1.dp.toPx() }
+
+    val isConnected = connectionState.isConnected
+    val isConnecting = connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+
+    // Cradle glow color based on connection state
+    val cradleGlowColor = when {
+        isConnected -> Color(0xFF6366F1).copy(alpha = 0.18f)
+        isConnecting -> Color(0xFFF59E0B).copy(alpha = 0.16f)
+        else -> Color(0xFF6366F1).copy(alpha = 0.06f)
+    }
 
     Box(
         modifier = modifier
@@ -132,17 +148,17 @@ fun ClientBottomNavBar(
                     style = Stroke(width = strokeWidthPx)
                 )
 
-                // Subtle ambient glow behind the center cradle
+                // Subtle dynamic ambient glow behind the center cradle
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF6366F1).copy(alpha = 0.12f),
+                            cradleGlowColor,
                             Color.Transparent
                         ),
                         center = Offset(cx, curveDepthPx * 0.5f),
-                        radius = curveHalfWidthPx * 1.2f
+                        radius = curveHalfWidthPx * 1.25f
                     ),
-                    radius = curveHalfWidthPx * 1.2f,
+                    radius = curveHalfWidthPx * 1.25f,
                     center = Offset(cx, curveDepthPx * 0.5f)
                 )
             }
@@ -170,9 +186,10 @@ fun ClientBottomNavBar(
                 onClick = { onTabSelected(ClientNavTab.USAGE) }
             )
 
-            // 3. Connect (Minimalist Center Hero Button nestled inside the narrow curved cradle)
+            // 3. Connect (Minimalist Center Hero Button with dynamic visual state)
             MinimalConnectCenterItem(
                 isSelected = selectedTab == ClientNavTab.CONNECT,
+                connectionState = connectionState,
                 onClick = { onTabSelected(ClientNavTab.CONNECT) }
             )
 
@@ -197,27 +214,54 @@ fun ClientBottomNavBar(
 
 /**
  * Minimalist Center Connect Item:
- * Matte obsidian disc with razor-thin luminous border nestled directly inside the cradle
+ * Matte obsidian disc with dynamic visual states mirroring the main connect button:
+ * - Connected: Electric Indigo border (#6366F1), periwinkle icon, "Stop" label
+ * - Connecting: Amber Gold border (#F59E0B), amber icon, "Cancel" label
+ * - Disconnected: Steel slate border (#232E44), slate icon, "Connect" label
  */
 @Composable
 private fun MinimalConnectCenterItem(
     isSelected: Boolean,
+    connectionState: ConnectionState,
     onClick: () -> Unit
 ) {
+    val isConnected = connectionState.isConnected
+    val isConnecting = connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+
+    val targetBorder = when {
+        isConnected -> Color(0xFF6366F1)
+        isConnecting -> Color(0xFFF59E0B)
+        isSelected -> Color(0xFF354466)
+        else -> Color(0xFF222F46)
+    }
+
+    val targetIcon = when {
+        isConnected -> Color(0xFFA5B4FC)
+        isConnecting -> Color(0xFFF59E0B)
+        isSelected -> Color(0xFFA5B4FC)
+        else -> Color(0xFF64748B)
+    }
+
+    val actionLabel = when {
+        isConnected -> "Stop"
+        isConnecting -> "Cancel"
+        else -> "Connect"
+    }
+
     val borderColor by animateColorAsState(
-        targetValue = if (isSelected) Color(0xFF6366F1) else Color(0xFF222F46),
+        targetValue = targetBorder,
         animationSpec = tween(300, easing = FastOutSlowInEasing),
         label = "HeroBorderColor"
     )
 
     val iconColor by animateColorAsState(
-        targetValue = if (isSelected) Color(0xFFA5B4FC) else Color(0xFF64748B),
+        targetValue = targetIcon,
         animationSpec = tween(300, easing = FastOutSlowInEasing),
         label = "HeroIconColor"
     )
 
     val labelColor by animateColorAsState(
-        targetValue = if (isSelected) Color(0xFFA5B4FC) else Color(0xFF64748B),
+        targetValue = if (isConnected || isConnecting || isSelected) targetIcon else Color(0xFF64748B),
         animationSpec = tween(300, easing = FastOutSlowInEasing),
         label = "HeroLabelColor"
     )
@@ -247,7 +291,7 @@ private fun MinimalConnectCenterItem(
         ) {
             Icon(
                 imageVector = Icons.Filled.PowerSettingsNew,
-                contentDescription = "Connect",
+                contentDescription = actionLabel,
                 tint = iconColor,
                 modifier = Modifier.size(22.dp)
             )
@@ -256,12 +300,29 @@ private fun MinimalConnectCenterItem(
         Spacer(modifier = Modifier.height(3.dp))
 
         Text(
-            text = "Connect",
+            text = actionLabel,
             fontSize = 9.5.sp,
             fontFamily = FontFamily.Monospace,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = if (isConnected || isConnecting || isSelected) FontWeight.Bold else FontWeight.Medium,
             letterSpacing = 0.5.sp,
             color = labelColor
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Tiny 2.5dp minimalist indicator dot when active / connected / connecting
+        Box(
+            modifier = Modifier
+                .size(2.5.dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        isConnected -> Color(0xFF818CF8)
+                        isConnecting -> Color(0xFFF59E0B)
+                        isSelected -> Color(0xFF818CF8)
+                        else -> Color.Transparent
+                    }
+                )
         )
     }
 }
