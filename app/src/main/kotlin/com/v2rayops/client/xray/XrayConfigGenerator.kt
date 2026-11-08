@@ -266,6 +266,9 @@ class XrayConfigGenerator @Inject constructor(
                     val sockopt = JSONObject().apply {
                         put("tcpNoDelay", true)
                         put("tcpKeepAliveInterval", 15)
+                        if (settings.dpiDelayFixEnabled) {
+                            put("dialerProxy", "fragment")
+                        }
                     }
                     put("sockopt", sockopt)
                 }
@@ -282,7 +285,7 @@ class XrayConfigGenerator @Inject constructor(
                 put("settings", JSONObject().apply {
                     put("domainStrategy", "AsIs")
                     put("fragment", JSONObject().apply {
-                        put("packets", "1-3")
+                        put("packets", "tlshello")
                         put("length", "100-200")
                         put("interval", "10-20")
                     })
