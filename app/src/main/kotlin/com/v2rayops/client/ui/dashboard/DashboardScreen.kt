@@ -4,6 +4,9 @@ import android.app.Activity
 import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -59,6 +64,22 @@ fun DashboardScreen(
 
     var speedMode by remember { mutableStateOf(SpeedOptimizationMode.BALANCED) }
     var showUsageCockpit by remember { mutableStateOf(false) }
+
+    val scrollState = rememberScrollState()
+
+    // Show top gradient ONLY when scrolled, smoothly ramping up without instant jump on 1px
+    val topGradientAlpha by remember {
+        derivedStateOf {
+            val startThreshold = 20f
+            val fullThreshold = 85f
+            ((scrollState.value.toFloat() - startThreshold) / (fullThreshold - startThreshold)).coerceIn(0f, 1f)
+        }
+    }
+    val animatedTopGradientAlpha by animateFloatAsState(
+        targetValue = topGradientAlpha,
+        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+        label = "TopGradientAlpha"
+    )
 
     val vpnPrepareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -108,7 +129,7 @@ fun DashboardScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -149,25 +170,28 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // Top Gradient Scrim: Blends scrolling content smoothly into the top bar with zero hard cuts!
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .align(Alignment.TopCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF050811),
-                                Color(0xFA050811),
-                                Color(0xCC050811),
-                                Color(0x77050811),
-                                Color(0x22050811),
-                                Color.Transparent
+            // Top Gradient Scrim: Appears smoothly only when scrolled past threshold (no instant flash on 1px)
+            if (animatedTopGradientAlpha > 0.005f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .align(Alignment.TopCenter)
+                        .graphicsLayer { alpha = animatedTopGradientAlpha }
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF050811),
+                                    Color(0xFA050811),
+                                    Color(0xCC050811),
+                                    Color(0x77050811),
+                                    Color(0x22050811),
+                                    Color.Transparent
+                                )
                             )
                         )
-                    )
-            )
+                )
+            }
 
             // Bottom Gradient Scrim: Blends into the bottom bar smoothly
             Box(
