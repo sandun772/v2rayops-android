@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2rayops.client.domain.model.ConnectionState
 import com.v2rayops.client.domain.model.TrafficStats
-import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun SpeedDividedSection(
@@ -31,16 +31,16 @@ fun SpeedDividedSection(
 ) {
     val isConnected = connectionState.isConnected
 
-    val (downNum, downUnit) = if (isConnected) {
-        splitRate(trafficStats.downloadBytesPerSec)
+    val downMbps: Int = if (isConnected) {
+        formatMbps(trafficStats.downloadBytesPerSec)
     } else {
-        "0.0" to "MB/s"
+        0
     }
 
-    val (upNum, upUnit) = if (isConnected) {
-        splitRate(trafficStats.uploadBytesPerSec)
+    val upMbps: Int = if (isConnected) {
+        formatMbps(trafficStats.uploadBytesPerSec)
     } else {
-        "0.0" to "MB/s"
+        0
     }
 
     Column(
@@ -75,7 +75,7 @@ fun SpeedDividedSection(
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
-                        text = downNum,
+                        text = downMbps.toString(),
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -83,7 +83,7 @@ fun SpeedDividedSection(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = downUnit,
+                        text = "Mbps",
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         color = Color(0xFF64748B),
@@ -117,7 +117,7 @@ fun SpeedDividedSection(
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
-                        text = upNum,
+                        text = upMbps.toString(),
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -125,7 +125,7 @@ fun SpeedDividedSection(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = upUnit,
+                        text = "Mbps",
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         color = Color(0xFF64748B),
@@ -145,13 +145,13 @@ fun SpeedDividedSection(
     }
 }
 
-private fun splitRate(bytesPerSec: Long): Pair<String, String> {
-    if (bytesPerSec <= 0) return "0.0" to "MB/s"
-    val kb = bytesPerSec / 1024.0
-    val mb = kb / 1024.0
-    return if (mb >= 1.0) {
-        String.format(Locale.US, "%.1f", mb) to "MB/s"
-    } else {
-        String.format(Locale.US, "%.0f", kb) to "KB/s"
-    }
+/**
+ * Converts raw bytes/sec into an integer megabit/sec (Mbps) value:
+ * 1 Byte = 8 bits, 1 Mbps = 1,000,000 bits/sec
+ */
+private fun formatMbps(bytesPerSec: Long): Int {
+    if (bytesPerSec <= 0L) return 0
+    val bitsPerSec = bytesPerSec * 8.0
+    val mbps = bitsPerSec / 1_000_000.0
+    return mbps.roundToInt().coerceAtLeast(0)
 }
