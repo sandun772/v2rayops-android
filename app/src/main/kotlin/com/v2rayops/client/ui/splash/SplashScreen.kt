@@ -27,13 +27,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -118,23 +121,49 @@ fun SplashScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(CyberBackground),
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF090E1D), // Atmospheric midnight indigo core
+                        Color(0xFF050812), // Seamless subtle transition
+                        CyberBackground    // #04060A deep cosmic edge
+                    )
+                )
+            ),
         contentAlignment = Alignment.Center
     ) {
-        // Ethereal Cyber End-Glow Blooming Behind Lockup
+        // Ethereal Multi-Tiered Cyber Ambient Bloom Behind Lockup
         if (glowVal > 0f) {
+            // Tier 1: Wide Ethereal Aurora Halo
             Box(
                 modifier = Modifier
-                    .size(width = 340.dp, height = 180.dp)
-                    .scale(1.2f)
+                    .size(width = 440.dp, height = 240.dp)
+                    .graphicsLayer {
+                        alpha = glowVal * 0.9f
+                    }
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                CyberPrimary.copy(alpha = 0.32f),
+                                CyberAccent.copy(alpha = 0.16f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            // Tier 2: Radiant Plasma Core directly behind brand lockup
+            Box(
+                modifier = Modifier
+                    .size(width = 280.dp, height = 120.dp)
                     .graphicsLayer {
                         alpha = glowVal
                     }
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                CyberPrimary.copy(alpha = 0.45f),
-                                CyberAccent.copy(alpha = 0.25f),
+                                Color(0xFF818CF8).copy(alpha = 0.42f),
+                                CyberAccent.copy(alpha = 0.22f),
                                 Color.Transparent
                             )
                         )
@@ -166,14 +195,21 @@ fun SplashScreen(
                             alpha = cardVal
                         }
                         .clip(RoundedCornerShape(22.dp))
-                        .background(CyberCard)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF141C2E), // Subtle titanium-tinted upper glass rim
+                                    CyberCard          // #0C101B deep obsidian base
+                                )
+                            )
+                        )
                         .border(
                             border = BorderStroke(
                                 width = 1.5.dp,
                                 brush = Brush.linearGradient(
                                     colors = listOf(
-                                        CyberPrimary.copy(alpha = 0.6f + glowVal * 0.4f),
-                                        CyberAccent.copy(alpha = 0.4f + glowVal * 0.4f)
+                                        Color(0xFF818CF8).copy(alpha = 0.7f + glowVal * 0.3f),
+                                        Color(0xFF06B6D4).copy(alpha = 0.5f + glowVal * 0.5f)
                                     )
                                 )
                             ),
@@ -191,7 +227,7 @@ fun SplashScreen(
                 )
             }
 
-            // 2. "RayOPS" Brand Text (GPU-accelerated slide & fade, zero relayout lag)
+            // 2. "RayOPS" Brand Text (Metallic Brushed-Platinum "Ray" + Electric Neon Aurora "OPS")
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -206,19 +242,45 @@ fun SplashScreen(
             ) {
                 Text(
                     text = "Ray",
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.SansSerif,
-                    letterSpacing = 0.5.sp,
-                    color = CyberTextPrimary
+                    style = TextStyle(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFFFFFFFF), // Pure white specular highlight
+                                Color(0xFFE2E8F0), // Platinum silver midtone
+                                Color(0xFF94A3B8)  // Brushed titanium shadow
+                            )
+                        ),
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.SansSerif,
+                        letterSpacing = 0.5.sp,
+                        shadow = Shadow(
+                            color = Color(0xAA000000),
+                            offset = Offset(0f, 2f),
+                            blurRadius = 6f
+                        )
+                    )
                 )
                 Text(
                     text = "OPS",
-                    fontSize = 36.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.SansSerif,
-                    letterSpacing = 1.sp,
-                    color = CyberPrimary
+                    style = TextStyle(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color(0xFF818CF8), // Electric violet
+                                Color(0xFF6366F1), // Cyber indigo
+                                Color(0xFF06B6D4)  // Neon cyan
+                            )
+                        ),
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.SansSerif,
+                        letterSpacing = 1.5.sp,
+                        shadow = Shadow(
+                            color = Color(0xFF6366F1).copy(alpha = 0.75f),
+                            offset = Offset(0f, 0f),
+                            blurRadius = 18f
+                        )
+                    )
                 )
             }
         }
