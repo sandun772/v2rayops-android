@@ -1,23 +1,31 @@
 package com.v2rayops.client.network
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import com.v2rayops.client.core.dispatchers.AppDispatchers
 import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.profiles.ProfileParser
 import com.v2rayops.client.vpn.VpnManager
 import com.v2rayops.client.xray.XrayEngine
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -66,8 +74,18 @@ data class NodeProbeReport(
     val summary: String
 )
 
+data class DnsServerCheckResult(
+    val provider: String,
+    val serverIp: String,
+    val protocol: String,
+    val latencyMs: Long,
+    val isReachable: Boolean,
+    val details: String = ""
+)
+
 @Singleton
 class ConnectionDiagnosticsManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val xrayEngine: XrayEngine,
     private val vpnManager: VpnManager,
     private val profileParser: ProfileParser,
@@ -77,6 +95,15 @@ class ConnectionDiagnosticsManager @Inject constructor(
         private const val TAG = "ConnectionDiagnostics"
         private const val LOCAL_PROXY_PORT = 10809
         private const val V2RAYOPS_SERVER_IP = "172.236.134.215"
+    }
+
+    private fun getPhysicalNetwork(): Network? {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return null
+        return cm.allNetworks.firstOrNull { net ->
+            val caps = cm.getNetworkCapabilities(net) ?: return@firstOrNull false
+            (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) || caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        }
     }
 
     /**
@@ -415,5 +442,280 @@ class ConnectionDiagnosticsManager @Inject constructor(
             wsError = wsError,
             summary = summary
         )
+    }
+
+    /**
+     * Probes any custom host/IP, SNI, and WebSocket path on demand for developer debugging.
+     */
+    suspend fun probeCustomEndpoint(
+        host: String,
+        port: Int = 443,
+        sni: String = "",
+        wsHost: String = "",
+        wsPath: String = "/v2rayops",
+        usePureCarrier: Boolean = true
+    ): NodeProbeReport = withContext(dispatchers.io) {
+        val effectiveHost = host.trim().removePrefix("https://").removePrefix("http://")
+        val effectiveSni = sni.ifBlank { effectiveHost }
+        val effectiveWsHost = wsHost.ifBlank { effectiveSni }
+        val physicalNet = if (usePureCarrier) getPhysicalNetwork() else null
+
+        // 1. DNS Resolution
+        val dnsStart = System.currentTimeMillis()
+        var dnsIps = emptyList<String>()
+        var dnsLatency = 0L
+        try {
+            val addrs = physicalNet?.getAllByName(effectiveHost) ?: InetAddress.getAllByName(effectiveHost)
+            dnsIps = addrs.mapNotNull { it.hostAddress }.filter { it.isNotBlank() }
+            dnsLatency = (System.currentTimeMillis() - dnsStart).coerceAtLeast(1L)
+        } catch (e: Exception) {
+            dnsLatency = (System.currentTimeMillis() - dnsStart).coerceAtLeast(1L)
+        }
+
+        val ipv4 = dnsIps.firstOrNull { !it.contains(":") } ?: dnsIps.firstOrNull() ?: effectiveHost
+
+        // 2. TCP Socket Connect
+        val tcpStart = System.currentTimeMillis()
+        var tcpSuccess = false
+        var tcpLatency = 0L
+        var tcpError = ""
+        var rawSocket: Socket? = null
+
+        try {
+            val s = Socket()
+            s.tcpNoDelay = true
+            s.reuseAddress = true
+            s.setSoLinger(true, 0)
+            if (physicalNet != null) {
+                try { physicalNet.bindSocket(s) } catch (_: Exception) {}
+            }
+            s.connect(InetSocketAddress(ipv4, port), 3500)
+            tcpLatency = (System.currentTimeMillis() - tcpStart).coerceAtLeast(1L)
+            tcpSuccess = true
+            rawSocket = s
+        } catch (e: Exception) {
+            tcpLatency = (System.currentTimeMillis() - tcpStart).coerceAtLeast(1L)
+            tcpError = e.message ?: "TCP Connect Timed Out"
+        }
+
+        // 3. TLS Handshake
+        var tlsSuccess = false
+        var tlsLatency = 0L
+        var tlsError = ""
+        var sslSocket: SSLSocket? = null
+
+        if (tcpSuccess && rawSocket != null) {
+            val tlsStart = System.currentTimeMillis()
+            try {
+                val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}
+                    override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) {}
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                })
+                val sslContext = SSLContext.getInstance("TLS")
+                sslContext.init(null, trustAll, SecureRandom())
+
+                val ssl = sslContext.socketFactory.createSocket(rawSocket, ipv4, port, true) as SSLSocket
+                ssl.tcpNoDelay = true
+                ssl.setSoLinger(true, 0)
+                val sslParams = SSLParameters()
+                sslParams.serverNames = listOf(SNIHostName(effectiveSni))
+                ssl.sslParameters = sslParams
+                ssl.soTimeout = 3500
+
+                ssl.startHandshake()
+                tlsLatency = (System.currentTimeMillis() - tlsStart).coerceAtLeast(1L)
+                tlsSuccess = true
+                sslSocket = ssl
+            } catch (e: Exception) {
+                tlsLatency = (System.currentTimeMillis() - tlsStart).coerceAtLeast(1L)
+                tlsError = e.message ?: "TLS Handshake Failed"
+            }
+        }
+
+        // 4. WebSocket Upgrade
+        var wsSuccess = false
+        var wsStatusLine = ""
+        var wsError = ""
+
+        if (sslSocket != null && sslSocket.isConnected) {
+            try {
+                val nonce = ByteArray(16)
+                SecureRandom().nextBytes(nonce)
+                val wsKey = Base64.getEncoder().encodeToString(nonce)
+                val wsRequest = "GET $wsPath HTTP/1.1\r\n" +
+                        "Host: $effectiveWsHost\r\n" +
+                        "Upgrade: websocket\r\n" +
+                        "Connection: Upgrade\r\n" +
+                        "Sec-WebSocket-Key: $wsKey\r\n" +
+                        "Sec-WebSocket-Version: 13\r\n\r\n"
+
+                val writer = sslSocket.outputStream
+                writer.write(wsRequest.toByteArray(Charsets.UTF_8))
+                writer.flush()
+
+                val reader = BufferedReader(InputStreamReader(sslSocket.inputStream))
+                wsStatusLine = reader.readLine() ?: ""
+                if (wsStatusLine.contains("101", ignoreCase = true)) {
+                    wsSuccess = true
+                } else {
+                    wsError = wsStatusLine.ifBlank { "No HTTP status response" }
+                }
+            } catch (e: Exception) {
+                wsError = e.message ?: "WS upgrade failed"
+            }
+        }
+
+        try {
+            sslSocket?.close()
+            rawSocket?.close()
+        } catch (_: Exception) {}
+
+        val summary = buildString {
+            append("DNS: ")
+            if (dnsIps.isNotEmpty()) append("OK (${dnsIps.first()}, ${dnsLatency}ms) | ")
+            else append("FAIL | ")
+            append("TCP: ")
+            if (tcpSuccess) append("OK (${tcpLatency}ms) | ")
+            else append("FAIL ($tcpError) | ")
+            append("TLS: ")
+            if (tlsSuccess) append("OK (SNI $effectiveSni, ${tlsLatency}ms) | ")
+            else append("FAIL ($tlsError) | ")
+            append("WS: ")
+            if (wsSuccess) append("READY (101 Switching Protocols)")
+            else if (wsStatusLine.isNotBlank()) append(wsStatusLine)
+            else append("FAIL ($wsError)")
+        }
+
+        NodeProbeReport(
+            nodeName = "Custom: $effectiveHost",
+            endpoint = "$effectiveHost:$port",
+            sni = effectiveSni,
+            dnsResolvedIps = dnsIps,
+            dnsLatencyMs = dnsLatency,
+            tcpSuccess = tcpSuccess,
+            tcpLatencyMs = tcpLatency,
+            tcpError = tcpError,
+            tlsSuccess = tlsSuccess,
+            tlsLatencyMs = tlsLatency,
+            tlsError = tlsError,
+            wsSuccess = wsSuccess,
+            wsStatusLine = wsStatusLine,
+            wsError = wsError,
+            summary = summary
+        )
+    }
+
+    /**
+     * Inspects Cloudflare, Google, Quad9, and Carrier DNS servers using both TCP 53 and UDP 53.
+     */
+    suspend fun inspectDnsResolvers(usePureCarrier: Boolean = true): List<DnsServerCheckResult> = withContext(dispatchers.io) {
+        val physicalNet = if (usePureCarrier) getPhysicalNetwork() else null
+        val results = mutableListOf<DnsServerCheckResult>()
+
+        val servers = listOf(
+            Triple("Cloudflare Primary", "1.1.1.1", 53),
+            Triple("Google Public", "8.8.8.8", 53),
+            Triple("Quad9 Secure", "9.9.9.9", 53),
+            Triple("Cloudflare Secondary", "1.0.0.1", 53)
+        )
+
+        for ((provider, ip, port) in servers) {
+            // Test 1: TCP Port 53
+            val tcpStart = System.currentTimeMillis()
+            var tcpOk = false
+            var tcpLat = 0L
+            var tcpErr = ""
+            try {
+                val s = Socket()
+                s.tcpNoDelay = true
+                if (physicalNet != null) {
+                    try { physicalNet.bindSocket(s) } catch (_: Exception) {}
+                }
+                s.connect(InetSocketAddress(ip, port), 1800)
+                tcpLat = (System.currentTimeMillis() - tcpStart).coerceAtLeast(1L)
+                tcpOk = true
+                s.close()
+            } catch (e: Exception) {
+                tcpErr = e.message ?: "Timeout"
+            }
+
+            results.add(
+                DnsServerCheckResult(
+                    provider = provider,
+                    serverIp = ip,
+                    protocol = "TCP:53",
+                    latencyMs = if (tcpOk) tcpLat else 0L,
+                    isReachable = tcpOk,
+                    details = if (tcpOk) "TCP Handshake Pass in ${tcpLat}ms" else "TCP Rejected: $tcpErr"
+                )
+            )
+
+            // Test 2: UDP Port 53 Datagram Query
+            val udpStart = System.currentTimeMillis()
+            var udpOk = false
+            var udpLat = 0L
+            var udpErr = ""
+            try {
+                val ds = DatagramSocket()
+                ds.soTimeout = 1500
+                val query = byteArrayOf(
+                    0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x06, 0x67, 0x6f, 0x6f,
+                    0x67, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00,
+                    0x00, 0x01, 0x00, 0x01
+                )
+                val targetAddr = if (physicalNet != null) physicalNet.getByName(ip) else InetAddress.getByName(ip)
+                val sendPacket = DatagramPacket(query, query.size, targetAddr, port)
+                ds.send(sendPacket)
+                val buf = ByteArray(512)
+                val recPacket = DatagramPacket(buf, buf.size)
+                ds.receive(recPacket)
+                udpLat = (System.currentTimeMillis() - udpStart).coerceAtLeast(1L)
+                udpOk = true
+                ds.close()
+            } catch (e: Exception) {
+                udpErr = e.message ?: "Carrier UDP 53 Filtered/Timeout"
+            }
+
+            results.add(
+                DnsServerCheckResult(
+                    provider = provider,
+                    serverIp = ip,
+                    protocol = "UDP:53",
+                    latencyMs = if (udpOk) udpLat else 0L,
+                    isReachable = udpOk,
+                    details = if (udpOk) "UDP Query Resolved in ${udpLat}ms" else "UDP Blocked: $udpErr"
+                )
+            )
+        }
+
+        // Test 3: System Local Carrier Resolver
+        val sysStart = System.currentTimeMillis()
+        var sysOk = false
+        var sysLat = 0L
+        var sysErr = ""
+        var sysIps = ""
+        try {
+            val addrs = physicalNet?.getAllByName("dns.google") ?: InetAddress.getAllByName("dns.google")
+            sysLat = (System.currentTimeMillis() - sysStart).coerceAtLeast(1L)
+            sysOk = addrs.isNotEmpty()
+            sysIps = addrs.joinToString { it.hostAddress ?: "" }
+        } catch (e: Exception) {
+            sysErr = e.message ?: "Resolver failed"
+        }
+
+        results.add(
+            DnsServerCheckResult(
+                provider = "Carrier Default Resolver",
+                serverIp = "Local System",
+                protocol = "System DNS",
+                latencyMs = if (sysOk) sysLat else 0L,
+                isReachable = sysOk,
+                details = if (sysOk) "Resolved 'dns.google' -> [$sysIps] in ${sysLat}ms" else "Failed: $sysErr"
+            )
+        )
+
+        results
     }
 }

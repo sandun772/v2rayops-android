@@ -135,9 +135,7 @@ class NetworkOptimizerEngine @Inject constructor(
 
         // 3. Deep Packet Inspection (DPI) Delay Probe
         // Measures TLS ClientHello stall caused by carrier DPI middleboxes
-        var dpiDelay = 0L
-        var isDpiDetected = false
-        try {
+        val (dpiDelay, isDpiDetected) = try {
             val tcpStart = System.currentTimeMillis()
             val socket = Socket()
             socket.connect(InetSocketAddress(targetIp, port), 2500)
@@ -160,13 +158,13 @@ class NetworkOptimizerEngine @Inject constructor(
             val tlsElapsed = System.currentTimeMillis() - tlsStart
             socket.close()
 
-            dpiDelay = (tlsElapsed - tcpElapsed).coerceAtLeast(0L)
-            isDpiDetected = dpiDelay > 70L || jitter > 45L
-            AppLogger.i(TAG, "DPI Delay Audit: TCP=${tcpElapsed}ms, TLS=${tlsElapsed}ms, DPI Stall Delta=+${dpiDelay}ms (DPI Detected: $isDpiDetected)")
+            val delay = (tlsElapsed - tcpElapsed).coerceAtLeast(0L)
+            val detected = delay > 70L || jitter > 45L
+            AppLogger.i(TAG, "DPI Delay Audit: TCP=${tcpElapsed}ms, TLS=${tlsElapsed}ms, DPI Stall Delta=+${delay}ms (DPI Detected: $detected)")
+            Pair(delay, detected)
         } catch (e: Exception) {
-            dpiDelay = 120L
-            isDpiDetected = true
             AppLogger.d(TAG, "DPI test encountered carrier drop: ${e.message}")
+            Pair(120L, true)
         }
 
         // 4. DNS Benchmark Race (Cloudflare, Google, Quad9)
@@ -178,31 +176,65 @@ class NetworkOptimizerEngine @Inject constructor(
 
         val dnsResults = dnsServers.map { (ip, provider, dnsPort) ->
             val start = System.currentTimeMillis()
-            var reachable: Boolean
+            var reachable = false
+            var latency = 0L
+
+            // 1. Primary Test: TCP Port 53 socket handshake (reliable network route RTT without UDP loss/block)
             try {
-                DatagramSocket().use { socket ->
-                    socket.soTimeout = 1800
-                    val dnsQuery = byteArrayOf(
-                        0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x00, 0x07, 0x76, 0x70, 0x6e,
-                        0x78, 0x68, 0x75, 0x62, 0x03, 0x63, 0x6f, 0x6d,
-                        0x00, 0x00, 0x01, 0x00, 0x01
-                    )
-                    val packet = DatagramPacket(dnsQuery, dnsQuery.size, InetAddress.getByName(ip), dnsPort)
-                    socket.send(packet)
-                    val responseBuffer = ByteArray(512)
-                    val receivePacket = DatagramPacket(responseBuffer, responseBuffer.size)
-                    socket.receive(receivePacket)
+                Socket().use { s ->
+                    s.tcpNoDelay = true
+                    s.connect(InetSocketAddress(ip, dnsPort), 1500)
+                    latency = System.currentTimeMillis() - start
                     reachable = true
                 }
-            } catch (_: Exception) {
-                reachable = false
+            } catch (_: Exception) {}
+
+            // 2. Secondary Test: If TCP connect was rejected or timed out, try UDP DNS query
+            if (!reachable) {
+                try {
+                    val udpStart = System.currentTimeMillis()
+                    DatagramSocket().use { socket ->
+                        socket.soTimeout = 1200
+                        val dnsQuery = byteArrayOf(
+                            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x06, 0x67, 0x6f, 0x6f,
+                            0x67, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00,
+                            0x00, 0x01, 0x00, 0x01
+                        )
+                        val packet = DatagramPacket(dnsQuery, dnsQuery.size, InetAddress.getByName(ip), dnsPort)
+                        socket.send(packet)
+                        val responseBuffer = ByteArray(512)
+                        val receivePacket = DatagramPacket(responseBuffer, responseBuffer.size)
+                        socket.receive(receivePacket)
+                        latency = System.currentTimeMillis() - udpStart
+                        reachable = true
+                    }
+                } catch (_: Exception) {}
             }
-            val elapsed = System.currentTimeMillis() - start
+
+            // 3. Fallback: If raw port 53 sockets were filtered by the cellular carrier,
+            // query system carrier resolver for the DNS provider hostname to measure network response
+            if (!reachable) {
+                try {
+                    val sysStart = System.currentTimeMillis()
+                    val hostToCheck = when (ip) {
+                        "1.1.1.1" -> "one.one.one.one"
+                        "8.8.8.8" -> "dns.google"
+                        else -> "quad9.net"
+                    }
+                    val addrs = InetAddress.getAllByName(hostToCheck)
+                    if (addrs.isNotEmpty()) {
+                        latency = System.currentTimeMillis() - sysStart
+                        reachable = true
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val finalLatency = if (reachable) latency.coerceAtLeast(1L) else 999L
             DnsBenchmarkResult(
                 serverIp = ip,
                 providerName = provider,
-                latencyMs = if (reachable) elapsed else 999L,
+                latencyMs = finalLatency,
                 isReachable = reachable
             )
         }

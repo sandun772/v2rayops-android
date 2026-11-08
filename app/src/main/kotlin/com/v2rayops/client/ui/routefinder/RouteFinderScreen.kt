@@ -96,6 +96,8 @@ fun RouteFinderScreen(
     val activeScanProfile by viewModel.activeScanProfile.collectAsState()
     val appliedRouteKey by viewModel.appliedRouteKey.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
+    val wordQuery by viewModel.wordQuery.collectAsState()
+    val vpnConnectionState by viewModel.vpnConnectionState.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
 
@@ -149,6 +151,181 @@ fun RouteFinderScreen(
                     }
                 }
             )
+
+            // 1. Pure Direct Carrier Mode Banner
+            CyberCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                padding = 8.dp,
+                backgroundColor = CyberCard
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(CyberSuccess)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Column {
+                            Text(
+                                text = "PURE CARRIER DIRECT: ${viewModel.physicalNetworkType}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            )
+                            Text(
+                                text = if (vpnConnectionState.isConnected) "VPN Active: Probes bind directly to physical radio to verify 0-balance pass" else "Pure physical network link (No VPN interference)",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextMuted,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    if (vpnConnectionState.isConnected) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Button(
+                            onClick = { viewModel.pauseVpn() },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberDanger.copy(alpha = 0.2f)),
+                            shape = RoundedCornerShape(4.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberDanger.copy(alpha = 0.5f)),
+                            modifier = Modifier.height(28.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                text = "PAUSE VPN",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberDanger
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 2. Word-Based SNI Discovery Card
+            CyberCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 3.dp),
+                padding = 8.dp,
+                backgroundColor = CyberCardElevated
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = null,
+                                tint = CyberAccent,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "WORD-BASED SNI DISCOVERY",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            )
+                        }
+                        Text(
+                            text = "100% WS 101 READY",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberSuccess
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Preset Quick Chips Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        PresetChip("EDU / WORK") { viewModel.scanPresetPack("edu") }
+                        PresetChip("TIKTOK") { viewModel.scanPresetPack("tiktok") }
+                        PresetChip("WHATSAPP") { viewModel.scanPresetPack("social") }
+                        PresetChip("CLOUDFLARE") { viewModel.scanPresetPack("cloudflare") }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Keyword Search Field + Scan Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = wordQuery,
+                            onValueChange = { viewModel.setWordQuery(it) },
+                            placeholder = {
+                                Text(
+                                    text = "Enter words (e.g. zoom, dialog, tiktok, slt)",
+                                    fontSize = 9.sp,
+                                    color = CyberTextMuted
+                                )
+                            },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = CyberAccent,
+                                unfocusedBorderColor = CyberBorderSubtle,
+                                focusedContainerColor = CyberBackground,
+                                unfocusedContainerColor = CyberBackground
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp),
+                            shape = RoundedCornerShape(4.dp)
+                        )
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        Button(
+                            onClick = { viewModel.scanWords(wordQuery) },
+                            enabled = wordQuery.isNotBlank() && !isScanning,
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberAccent),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.height(40.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                text = "SCAN WORDS",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.Black
+                            )
+                        }
+                    }
+                }
+            }
 
             // Strategy Filter Pills: [ ALL MODES | STANDARD SNI | ADDR SNI (FRONTING) ]
             Row(
@@ -814,4 +991,28 @@ private fun AddCustomHostDialog(
             }
         }
     )
+}
+
+@Composable
+private fun PresetChip(
+    label: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(CyberCard)
+            .border(1.dp, CyberBorderSubtle, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = CyberTextSecondary
+        )
+    }
 }

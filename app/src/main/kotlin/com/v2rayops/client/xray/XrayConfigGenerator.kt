@@ -64,6 +64,15 @@ class XrayConfigGenerator @Inject constructor(
                 // For known Zoom CDN bug host, map directly to fast verified Cloudflare IPv4 edge
                 if (parsed != null && parsed.host.contains("zoom.us", ignoreCase = true)) {
                     put(parsed.host, "170.114.45.6")
+                } else if (parsed != null && !isVpsHost(parsed.host) && !isIp(parsed.host)) {
+                    // Pre-resolve bug host domains to IPv4 so Xray dials directly without waiting for DNS
+                    try {
+                        val resolved = java.net.InetAddress.getAllByName(parsed.host)
+                        val ipv4 = resolved.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+                        if (!ipv4.isNullOrBlank()) {
+                            put(parsed.host, ipv4)
+                        }
+                    } catch (_: Exception) {}
                 }
             }
             put("hosts", hosts)

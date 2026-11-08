@@ -1,5 +1,9 @@
 package com.v2rayops.client.network
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import com.v2rayops.client.core.dispatchers.AppDispatchers
 import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.core.result.AppResult
@@ -7,6 +11,7 @@ import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.profiles.ProfileParser
 import com.v2rayops.client.vpn.VpnManager
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -94,9 +99,11 @@ data class SniRouteCandidate(
  * Route Scanner Engine:
  * Benchmarks carrier bug host SNIs and fronting Addr-SNI routes to discover the fastest,
  * zero-timeout tunneling path for the client's current mobile carrier (Dialog, Mobitel, etc.) or Wi-Fi.
+ * Supports Pure Direct Carrier Mode (binding raw sockets to physical cellular/Wi-Fi interface, bypassing VPN).
  */
 @Singleton
 class RouteScannerEngine @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val subscriptionRepository: SubscriptionRepository,
     private val profileParser: ProfileParser,
     private val vpnManager: VpnManager,
@@ -137,7 +144,20 @@ class RouteScannerEngine @Inject constructor(
 
         val DEFAULT_CANDIDATES: List<SniRouteCandidate> = RAW_BUG_DOMAINS.flatMap { (domain, cat) ->
             listOf(
-                // 1. Standard SNI Strategy: Connect to VPS, send domain in TLS SNI
+                // 1. Addr SNI Strategy (Fronting):
+                // Destination address connects to bug host (e.g. support.zoom.us), TLS SNI & Host are VPS domain
+                SniRouteCandidate(
+                    domain = domain,
+                    strategy = RouteStrategy.ADDR_SNI,
+                    category = cat,
+                    targetHost = domain,
+                    targetPort = 443,
+                    sni = DEFAULT_VPS_DOMAIN,
+                    wsHost = DEFAULT_VPS_DOMAIN,
+                    wsPath = "/v2rayops"
+                ),
+                // 2. Standard SNI Strategy:
+                // Destination connects to VPS IP, TLS SNI is bug host domain
                 SniRouteCandidate(
                     domain = domain,
                     strategy = RouteStrategy.STANDARD_SNI,
@@ -147,22 +167,107 @@ class RouteScannerEngine @Inject constructor(
                     sni = domain,
                     wsHost = DEFAULT_VPS_DOMAIN,
                     wsPath = "/v2rayops"
-                ),
-                // 2. Addr SNI Strategy (Fronting): URI address is bug host domain, dials VPS cluster with zero-rated SNI
-                SniRouteCandidate(
-                    domain = domain,
-                    strategy = RouteStrategy.ADDR_SNI,
-                    category = cat,
-                    targetHost = DEFAULT_VPS_IP,
-                    targetPort = 443,
-                    sni = domain,
-                    wsHost = DEFAULT_VPS_DOMAIN,
-                    wsPath = "/v2rayops"
                 )
             )
         }
+
+        /**
+         * Word-Based SNI Generator:
+         * Expands user keywords (e.g. "zoom", "dialog", "tiktok", "teams", "slt")
+         * into domain candidates and creates both ADDR_SNI and STANDARD_SNI candidates.
+         */
+        fun generateCandidatesFromWords(words: List<String>): List<SniRouteCandidate> {
+            val domainTemplates = listOf(
+                { w: String -> "support.$w.us" },
+                { w: String -> "news.$w.us" },
+                { w: String -> "$w.us" },
+                { w: String -> "$w.com" },
+                { w: String -> "api.$w.com" },
+                { w: String -> "static.$w.com" },
+                { w: String -> "m.$w.com" },
+                { w: String -> "portal.$w.lk" },
+                { w: String -> "learn.$w.lk" },
+                { w: String -> "$w.lk" },
+                { w: String -> "${w}cdn.com" },
+                { w: String -> "p16-va.${w}cdn.com" },
+                { w: String -> "v16m.${w}cdn.com" },
+                { w: String -> "cdn.$w.net" },
+                { w: String -> "web.$w.com" },
+                { w: String -> "media.$w.net" }
+            )
+
+            val cleanWords = words
+                .flatMap { it.split(",", " ", ";", "\n", "\t") }
+                .map { it.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www.") }
+                .filter { it.isNotBlank() }
+                .distinct()
+
+            val generatedDomains = mutableSetOf<String>()
+            for (w in cleanWords) {
+                if (w.contains(".")) {
+                    generatedDomains.add(w)
+                } else {
+                    domainTemplates.forEach { t -> generatedDomains.add(t(w)) }
+                }
+            }
+
+            return generatedDomains.flatMap { d ->
+                val cat = when {
+                    d.contains("zoom") || d.contains("teams") || d.contains("learn") || d.contains("office") -> SniCategory.ZOOM_TEAMS
+                    d.contains("tiktok") -> SniCategory.TIKTOK
+                    d.contains("whatsapp") -> SniCategory.WHATSAPP_SOCIAL
+                    d.contains("cloudflare") || d.contains("one") -> SniCategory.CLOUDFLARE_EDGE
+                    else -> SniCategory.CUSTOM
+                }
+                listOf(
+                    SniRouteCandidate(
+                        domain = d,
+                        strategy = RouteStrategy.ADDR_SNI,
+                        category = cat,
+                        targetHost = d,
+                        targetPort = 443,
+                        sni = DEFAULT_VPS_DOMAIN,
+                        wsHost = DEFAULT_VPS_DOMAIN,
+                        wsPath = "/v2rayops"
+                    ),
+                    SniRouteCandidate(
+                        domain = d,
+                        strategy = RouteStrategy.STANDARD_SNI,
+                        category = cat,
+                        targetHost = DEFAULT_VPS_IP,
+                        targetPort = 443,
+                        sni = d,
+                        wsHost = DEFAULT_VPS_DOMAIN,
+                        wsPath = "/v2rayops"
+                    )
+                )
+            }
+        }
     }
 
+    /**
+     * Finds the underlying physical network (Cellular radio or Wi-Fi),
+     * ignoring any active Android VPN interface so probes test the pure carrier connection.
+     */
+    fun getUnderlyingPhysicalNetwork(): Network? {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return null
+        return cm.allNetworks.firstOrNull { net ->
+            val caps = cm.getNetworkCapabilities(net) ?: return@firstOrNull false
+            (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) || caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        }
+    }
+
+    fun getPhysicalNetworkType(): String {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return "UNKNOWN"
+        val net = getUnderlyingPhysicalNetwork() ?: return "NO PHYSICAL NETWORK"
+        val caps = cm.getNetworkCapabilities(net) ?: return "CONNECTED"
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "CELLULAR (RADIO DIRECT)"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "WIFI (DIRECT)"
+            else -> "PHYSICAL LINK"
+        }
+    }
     private data class SampleProbeResult(
         val success: Boolean,
         val isWsReady: Boolean,
@@ -182,12 +287,38 @@ class RouteScannerEngine @Inject constructor(
         var rawSocket: Socket? = null
         var sslSocket: SSLSocket? = null
         try {
+            val physicalNet = getUnderlyingPhysicalNetwork()
+
+            // Resolve targetHost to IPv4 using physical network resolver if possible
+            val resolvedIps = try {
+                if (physicalNet != null) {
+                    physicalNet.getAllByName(targetHost).toList()
+                } else {
+                    java.net.InetAddress.getAllByName(targetHost).toList()
+                }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            val targetIp = resolvedIps.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+                ?: resolvedIps.firstOrNull()?.hostAddress
+                ?: targetHost
+
             val s = Socket()
             s.tcpNoDelay = true
             s.reuseAddress = true
             s.setSoLinger(true, 0)
-            s.connect(InetSocketAddress(targetHost, port), timeoutMs)
+
+            // CRITICAL: Bind socket directly to physical cellular / Wi-Fi network interface
+            // This ensures pure scanning that completely bypasses any active VPN tunnel
+            try {
+                physicalNet?.bindSocket(s)
+            } catch (e: Exception) {
+                AppLogger.d(TAG, "Binding socket to physical network skipped: ${e.message}")
+            }
+
+            s.connect(InetSocketAddress(targetIp, port), timeoutMs)
             rawSocket = s
+            val tcpLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(1L)
 
             val startTls = System.currentTimeMillis()
             val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
@@ -198,7 +329,7 @@ class RouteScannerEngine @Inject constructor(
             val sslContext = SSLContext.getInstance("TLS")
             sslContext.init(null, trustAll, SecureRandom())
 
-            val ssl = sslContext.socketFactory.createSocket(s, targetHost, port, true) as SSLSocket
+            val ssl = sslContext.socketFactory.createSocket(s, targetIp, port, true) as SSLSocket
             ssl.tcpNoDelay = true
             ssl.setSoLinger(true, 0)
             val sslParams = SSLParameters()
@@ -208,7 +339,7 @@ class RouteScannerEngine @Inject constructor(
 
             ssl.startHandshake()
             sslSocket = ssl
-            val tlsLatency = System.currentTimeMillis() - startTls
+            val tlsLatency = (System.currentTimeMillis() - startTls).coerceAtLeast(1L)
 
             var wsPassed = false
             var wsError = ""
@@ -239,7 +370,7 @@ class RouteScannerEngine @Inject constructor(
                 wsError = e.message ?: "WS upgrade failed"
             }
 
-            val totalLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(tlsLatency)
+            val totalLatency = (System.currentTimeMillis() - startTcp).coerceAtLeast(tcpLatency + tlsLatency)
             return if (wsPassed) {
                 SampleProbeResult(true, true, totalLatency, "")
             } else if (wsError.isNotBlank() && (wsError.contains("400") || wsError.contains("HTTP"))) {
@@ -356,19 +487,19 @@ class RouteScannerEngine @Inject constructor(
         val semaphore = Semaphore(2) // Controlled concurrency to prevent mobile carrier burst throttling
         val total = candidates.size
 
-        // Deduplicate probes by domain to prevent socket flooding & carrier DPI throttling
-        val uniqueDomains = candidates.map { it.domain }.distinct()
-        val domainResults = ConcurrentHashMap<String, SniRouteCandidate>()
+        // Deduplicate probes by candidate key (strategy + domain) to probe BOTH Standard SNI and Addr Fronting
+        val candidateKeys = candidates.map { "${it.strategy.name}:${it.domain}" }.distinct()
+        val candidateResults = ConcurrentHashMap<String, SniRouteCandidate>()
         var scannedCount = 0
 
-        val deferredList = uniqueDomains.map { domain ->
-            val sampleCandidate = candidates.first { it.domain == domain }
+        val deferredList = candidateKeys.map { key ->
+            val sampleCandidate = candidates.first { "${it.strategy.name}:${it.domain}" == key }
             async(dispatchers.io) {
                 semaphore.withPermit {
                     val result = scanCandidate(sampleCandidate, profile)
-                    domainResults[domain] = result
+                    candidateResults[key] = result
                     synchronized(this@RouteScannerEngine) {
-                        val matching = candidates.filter { it.domain == domain }
+                        val matching = candidates.filter { "${it.strategy.name}:${it.domain}" == key }
                         scannedCount += matching.size
                         matching.forEach { match ->
                             onProgress(scannedCount, total, match.copy(
@@ -395,7 +526,8 @@ class RouteScannerEngine @Inject constructor(
         deferredList.awaitAll()
 
         candidates.map { candidate ->
-            val probe = domainResults[candidate.domain]
+            val key = "${candidate.strategy.name}:${candidate.domain}"
+            val probe = candidateResults[key]
             if (probe != null) {
                 candidate.copy(
                     status = probe.status,
