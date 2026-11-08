@@ -4,25 +4,43 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.core.result.AppResult
+import com.v2rayops.client.network.CongestionStressProgress
+import com.v2rayops.client.network.CongestionStressResult
+import com.v2rayops.client.network.Download100MbProgress
+import com.v2rayops.client.network.Download100MbResult
+import com.v2rayops.client.network.NetworkStressSuiteEngine
 import com.v2rayops.client.network.RouteScannerEngine
 import com.v2rayops.client.network.RouteStrategy
 import com.v2rayops.client.network.ScanProfile
 import com.v2rayops.client.network.SniCategory
 import com.v2rayops.client.network.SniRouteCandidate
 import com.v2rayops.client.network.SniStatus
+import com.v2rayops.client.network.SpeedTestProgress
+import com.v2rayops.client.network.SpeedTestResult
+import com.v2rayops.client.network.StabilityProgress
+import com.v2rayops.client.network.TwoMinuteStabilityResult
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class CandidateBenchmarkType(val title: String) {
+    SPEEDTEST("FULL SPEEDTEST"),
+    STABILITY_2MIN("2-MIN STABILITY AUDIT"),
+    DOWNLOAD_100MB("100MB DOWNLOAD & DEV REPORT"),
+    CONGESTION_STRESS("CONGESTION (DL+UL+PING) STRESS")
+}
+
 @HiltViewModel
 class RouteFinderViewModel @Inject constructor(
     private val routeScannerEngine: RouteScannerEngine,
-    private val vpnManager: VpnManager
+    private val vpnManager: VpnManager,
+    private val stressSuiteEngine: NetworkStressSuiteEngine
 ) : ViewModel() {
 
     private val _candidates = MutableStateFlow<List<SniRouteCandidate>>(RouteScannerEngine.DEFAULT_CANDIDATES)
@@ -59,6 +77,39 @@ class RouteFinderViewModel @Inject constructor(
 
     val physicalNetworkType: String
         get() = routeScannerEngine.getPhysicalNetworkType()
+
+    // --- Targeted Candidate Benchmark States ---
+    private var benchmarkJob: Job? = null
+
+    private val _selectedCandidate = MutableStateFlow<SniRouteCandidate?>(null)
+    val selectedCandidate: StateFlow<SniRouteCandidate?> = _selectedCandidate.asStateFlow()
+
+    private val _activeBenchmarkType = MutableStateFlow<CandidateBenchmarkType>(CandidateBenchmarkType.SPEEDTEST)
+    val activeBenchmarkType: StateFlow<CandidateBenchmarkType> = _activeBenchmarkType.asStateFlow()
+
+    private val _isBenchmarkSheetOpen = MutableStateFlow(false)
+    val isBenchmarkSheetOpen: StateFlow<Boolean> = _isBenchmarkSheetOpen.asStateFlow()
+
+    // Individual progress & results
+    private val _stabilityProgress = MutableStateFlow(StabilityProgress())
+    val stabilityProgress: StateFlow<StabilityProgress> = _stabilityProgress.asStateFlow()
+    private val _stabilityResult = MutableStateFlow<TwoMinuteStabilityResult?>(null)
+    val stabilityResult: StateFlow<TwoMinuteStabilityResult?> = _stabilityResult.asStateFlow()
+
+    private val _download100MbProgress = MutableStateFlow(Download100MbProgress())
+    val download100MbProgress: StateFlow<Download100MbProgress> = _download100MbProgress.asStateFlow()
+    private val _download100MbResult = MutableStateFlow<Download100MbResult?>(null)
+    val download100MbResult: StateFlow<Download100MbResult?> = _download100MbResult.asStateFlow()
+
+    private val _congestionProgress = MutableStateFlow(CongestionStressProgress())
+    val congestionProgress: StateFlow<CongestionStressProgress> = _congestionProgress.asStateFlow()
+    private val _congestionResult = MutableStateFlow<CongestionStressResult?>(null)
+    val congestionResult: StateFlow<CongestionStressResult?> = _congestionResult.asStateFlow()
+
+    private val _speedTestProgress = MutableStateFlow(SpeedTestProgress())
+    val speedTestProgress: StateFlow<SpeedTestProgress> = _speedTestProgress.asStateFlow()
+    private val _speedTestResult = MutableStateFlow<SpeedTestResult?>(null)
+    val speedTestResult: StateFlow<SpeedTestResult?> = _speedTestResult.asStateFlow()
 
     init {
         startScan()
@@ -164,6 +215,84 @@ class RouteFinderViewModel @Inject constructor(
                 is AppResult.Loading -> Unit
             }
         }
+    }
+
+    // --- Candidate Benchmark Management ---
+    fun openBenchmark(candidate: SniRouteCandidate, type: CandidateBenchmarkType = CandidateBenchmarkType.SPEEDTEST) {
+        _selectedCandidate.value = candidate
+        _activeBenchmarkType.value = type
+        _isBenchmarkSheetOpen.value = true
+        // Reset results
+        _stabilityResult.value = null
+        _download100MbResult.value = null
+        _congestionResult.value = null
+        _speedTestResult.value = null
+    }
+
+    fun closeBenchmark() {
+        stopActiveBenchmark()
+        _isBenchmarkSheetOpen.value = false
+    }
+
+    fun selectBenchmarkType(type: CandidateBenchmarkType) {
+        if (_activeBenchmarkType.value != type) {
+            stopActiveBenchmark()
+            _activeBenchmarkType.value = type
+        }
+    }
+
+    fun applyAndRunBenchmark(candidate: SniRouteCandidate, type: CandidateBenchmarkType) {
+        viewModelScope.launch {
+            applyCandidate(candidate)
+            openBenchmark(candidate, type)
+            runActiveBenchmark()
+        }
+    }
+
+    fun runActiveBenchmark() {
+        val candidate = _selectedCandidate.value ?: return
+        stopActiveBenchmark()
+        AppLogger.i("RouteFinderVM", "Starting ${_activeBenchmarkType.value.title} on candidate '${candidate.domain}'")
+
+        benchmarkJob = viewModelScope.launch {
+            try {
+                when (_activeBenchmarkType.value) {
+                    CandidateBenchmarkType.SPEEDTEST -> {
+                        _speedTestResult.value = null
+                        val res = stressSuiteEngine.runFullSpeedTest { _speedTestProgress.value = it }
+                        _speedTestResult.value = res
+                    }
+                    CandidateBenchmarkType.STABILITY_2MIN -> {
+                        _stabilityResult.value = null
+                        val res = stressSuiteEngine.runTwoMinuteStabilityTest(120) { _stabilityProgress.value = it }
+                        _stabilityResult.value = res
+                    }
+                    CandidateBenchmarkType.DOWNLOAD_100MB -> {
+                        _download100MbResult.value = null
+                        val res = stressSuiteEngine.run100MbDownloadTest { _download100MbProgress.value = it }
+                        _download100MbResult.value = res
+                    }
+                    CandidateBenchmarkType.CONGESTION_STRESS -> {
+                        _congestionResult.value = null
+                        val res = stressSuiteEngine.runCongestionStressTest(30) { _congestionProgress.value = it }
+                        _congestionResult.value = res
+                    }
+                }
+            } catch (ce: CancellationException) {
+                // Ignore cancel
+            } catch (e: Exception) {
+                AppLogger.e("RouteFinderVM", "Candidate benchmark failed: ${e.message}")
+            }
+        }
+    }
+
+    fun stopActiveBenchmark() {
+        benchmarkJob?.cancel()
+        benchmarkJob = null
+        _speedTestProgress.value = _speedTestProgress.value.copy(isRunning = false)
+        _stabilityProgress.value = _stabilityProgress.value.copy(isRunning = false)
+        _download100MbProgress.value = _download100MbProgress.value.copy(isRunning = false)
+        _congestionProgress.value = _congestionProgress.value.copy(isRunning = false)
     }
 
     fun setScanProfile(profile: ScanProfile) {

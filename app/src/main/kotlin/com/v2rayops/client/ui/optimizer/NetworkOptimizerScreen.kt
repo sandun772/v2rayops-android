@@ -27,10 +27,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AltRoute
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
@@ -40,7 +42,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -87,12 +91,22 @@ import com.v2rayops.client.network.BeastOptimizationReport
 import com.v2rayops.client.network.BeastProgressState
 import com.v2rayops.client.network.BeastTestPhase
 import com.v2rayops.client.network.BeastTestProfile
+import com.v2rayops.client.network.CongestionStressProgress
+import com.v2rayops.client.network.CongestionStressResult
+import com.v2rayops.client.network.Download100MbProgress
+import com.v2rayops.client.network.Download100MbResult
 import com.v2rayops.client.network.DownloadBenchmarkProgress
 import com.v2rayops.client.network.DownloadBenchmarkResult
 import com.v2rayops.client.network.InAppBenchmarkReport
 import com.v2rayops.client.network.NetworkOptimizationReport
+import com.v2rayops.client.network.SpeedTestPhase
+import com.v2rayops.client.network.SpeedTestProgress
+import com.v2rayops.client.network.SpeedTestResult
+import com.v2rayops.client.network.StabilityProgress
 import com.v2rayops.client.network.StreamingBenchmarkResult
 import com.v2rayops.client.network.StreamingQuality
+import com.v2rayops.client.network.TwoMinuteStabilityResult
+import java.util.Locale
 
 @Composable
 fun NetworkOptimizerScreen(
@@ -105,18 +119,23 @@ fun NetworkOptimizerScreen(
     val isApplying by viewModel.isApplying.collectAsState()
     val applySuccess by viewModel.applySuccess.collectAsState()
 
-    val dlProgress by viewModel.downloadProgress.collectAsState()
-    val dlResult by viewModel.downloadResult.collectAsState()
-    val streamResult by viewModel.streamingResult.collectAsState()
     val isTestingDl by viewModel.isTestingDownload.collectAsState()
+    val streamResult by viewModel.streamingResult.collectAsState()
     val isTestingStream by viewModel.isTestingStreaming.collectAsState()
-    val benchmarkReport by viewModel.benchmarkReport.collectAsState()
-    val isApplyingBench by viewModel.isApplyingBenchmark.collectAsState()
-    val benchApplySuccess by viewModel.benchmarkApplySuccess.collectAsState()
 
     val beastState by viewModel.beastProgressState.collectAsState()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Carrier Audit, 1: Download & Stream, 2: Beast Auto-Tune
+    // 2-Minute Stability, 100MB Download, Congestion Stress, Speedtest states
+    val stabProgress by viewModel.stabilityProgress.collectAsState()
+    val stabResult by viewModel.stabilityResult.collectAsState()
+    val dl100Progress by viewModel.download100MbProgress.collectAsState()
+    val dl100Result by viewModel.download100MbResult.collectAsState()
+    val congestionProgress by viewModel.congestionProgress.collectAsState()
+    val congestionResult by viewModel.congestionResult.collectAsState()
+    val speedProgress by viewModel.speedTestProgress.collectAsState()
+    val speedResult by viewModel.speedTestResult.collectAsState()
+
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Carrier Audit, 1: Speedtest, 2: Stress & 100MB, 3: Beast Auto-Tune
 
     Box(
         modifier = Modifier
@@ -132,49 +151,55 @@ fun NetworkOptimizerScreen(
                 title = "NETWORK OPTIMIZER",
                 onBackClick = onBackClick,
                 actions = {
+                    val anyActive = isAnalyzing || isTestingDl || isTestingStream || beastState.isRunning ||
+                            stabProgress.isRunning || dl100Progress.isRunning || congestionProgress.isRunning || speedProgress.isRunning
                     IconButton(
                         onClick = {
                             when (selectedTab) {
                                 0 -> viewModel.runAnalysis()
-                                1 -> viewModel.runFullThroughputTest()
-                                2 -> viewModel.startBeastOptimization(BeastTestProfile.EXHAUSTIVE_15M)
+                                1 -> viewModel.startFullSpeedTest()
+                                2 -> viewModel.startTwoMinuteStabilityTest(120)
+                                3 -> viewModel.startBeastOptimization(BeastTestProfile.EXHAUSTIVE_15M)
                             }
                         },
-                        enabled = !isAnalyzing && !isTestingDl && !isTestingStream && !beastState.isRunning
+                        enabled = !anyActive
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Re-analyze",
-                            tint = if (isAnalyzing || isTestingDl || isTestingStream || beastState.isRunning) CyberTextMuted else CyberAccent
+                            tint = if (anyActive) CyberTextMuted else CyberAccent
                         )
                     }
                 }
             )
 
-            // 3-Way Tab Selector: [ CARRIER AUDIT | SPEED & STREAM | BEAST AUTO-TUNE ]
+            // 4-Way Tab Selector: [ CARRIER & PMTU | SPEEDTEST | STRESS & 100MB | BEAST AUTO-TUNE ]
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 TabSelectorPill(
                     label = "CARRIER & PMTU",
                     isSelected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    modifier = Modifier.weight(1f)
+                    onClick = { selectedTab = 0 }
                 )
                 TabSelectorPill(
-                    label = "SPEED & STREAM",
+                    label = "SPEEDTEST",
                     isSelected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    modifier = Modifier.weight(1f)
+                    onClick = { selectedTab = 1 }
+                )
+                TabSelectorPill(
+                    label = "STRESS & 100MB",
+                    isSelected = selectedTab == 2,
+                    onClick = { selectedTab = 2 }
                 )
                 TabSelectorPill(
                     label = "BEAST AUTO-TUNE",
-                    isSelected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    modifier = Modifier.weight(1f)
+                    isSelected = selectedTab == 3,
+                    onClick = { selectedTab = 3 }
                 )
             }
 
@@ -375,24 +400,36 @@ fun NetworkOptimizerScreen(
                         }
                     }
                     1 -> {
-                        // TAB 1: IN-APP DOWNLOAD & STREAMING BENCHMARK
-                        ThroughputBenchmarkSection(
-                            progress = dlProgress,
-                            downloadResult = dlResult,
-                            streamingResult = streamResult,
-                            isTestingDownload = isTestingDl,
-                            isTestingStreaming = isTestingStream,
-                            benchmarkReport = benchmarkReport,
-                            isApplying = isApplyingBench,
-                            applySuccess = benchApplySuccess,
-                            onRunDownload = { viewModel.runDownloadTest() },
-                            onRunStreaming = { viewModel.runStreamingTest() },
-                            onRunFullTest = { viewModel.runFullThroughputTest() },
-                            onApplyOptimizations = { viewModel.applyBenchmarkOptimization() }
+                        // TAB 1: FULL 3-PHASE SPEEDTEST (PING / JITTER, DOWNLOAD, UPLOAD)
+                        SpeedTestSection(
+                            progress = speedProgress,
+                            result = speedResult,
+                            onStart = { viewModel.startFullSpeedTest() },
+                            onStop = { viewModel.stopFullSpeedTest() }
                         )
                     }
                     2 -> {
-                        // TAB 2: ALL-IN-ONE BEAST NETWORK OPTIMIZATION SUITE
+                        // TAB 2: STRESS & STABILITY SUITE (2-MIN AUDIT, 100MB DOWNLOAD, CONGESTION STRESS)
+                        StressAnd100MbSection(
+                            stabProgress = stabProgress,
+                            stabResult = stabResult,
+                            onStartStability = { viewModel.startTwoMinuteStabilityTest(120) },
+                            onStopStability = { viewModel.stopTwoMinuteStabilityTest() },
+                            dl100Progress = dl100Progress,
+                            dl100Result = dl100Result,
+                            onStartDl100 = { viewModel.start100MbDownloadTest() },
+                            onStopDl100 = { viewModel.stop100MbDownloadTest() },
+                            congestionProgress = congestionProgress,
+                            congestionResult = congestionResult,
+                            onStartCongestion = { viewModel.startCongestionStressTest(30) },
+                            onStopCongestion = { viewModel.stopCongestionStressTest() },
+                            streamingResult = streamResult,
+                            isTestingStreaming = isTestingStream,
+                            onRunStreaming = { viewModel.runStreamingTest() }
+                        )
+                    }
+                    3 -> {
+                        // TAB 3: ALL-IN-ONE BEAST NETWORK OPTIMIZATION SUITE
                         BeastOptimizationSection(
                             state = beastState,
                             onStart = { profile -> viewModel.startBeastOptimization(profile) },
@@ -423,12 +460,12 @@ private fun TabSelectorPill(
                 shape = RoundedCornerShape(6.dp)
             )
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = 10.sp,
+            fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
             color = if (isSelected) Color.White else CyberTextSecondary
@@ -903,6 +940,1043 @@ private fun BeastOptimizationSection(
         }
 
         Spacer(modifier = Modifier.height(30.dp))
+    }
+}
+
+@Composable
+private fun SpeedTestSection(
+    progress: SpeedTestProgress,
+    result: SpeedTestResult?,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        CyberCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = CyberCardElevated,
+            borderColor = if (progress.isRunning) CyberAccent else CyberBorder,
+            padding = 16.dp
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Speed,
+                            contentDescription = null,
+                            tint = CyberAccent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "SPEEDTEST (DL / UL / LATENCY)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = CyberTextPrimary,
+                            letterSpacing = 1.sp
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (progress.isRunning) CyberAccent.copy(alpha = 0.2f) else CyberBorderSubtle)
+                            .border(1.dp, if (progress.isRunning) CyberAccent else CyberBorder, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = progress.phase.label.uppercase(),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (progress.isRunning) CyberAccent else CyberTextMuted
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Throughput Readouts Grid (Download & Upload)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Download Speed Box
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CyberBackground)
+                            .border(1.dp, if (progress.phase == SpeedTestPhase.DOWNLOAD) CyberAccent else CyberBorderSubtle, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = CyberSuccess, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "DOWNLOAD",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberTextMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val displayDl = if (progress.phase == SpeedTestPhase.DOWNLOAD && progress.currentSpeedMbps > 0) {
+                                progress.currentSpeedMbps
+                            } else {
+                                result?.downloadSpeedMbps ?: progress.downloadSpeedMbps
+                            }
+                            Text(
+                                text = "%.2f".format(Locale.US, displayDl),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            )
+                            Text(
+                                text = "Mbps" + (if (result != null) " (Peak: ${"%.1f".format(Locale.US, result.peakDownloadMbps)})" else ""),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextMuted
+                            )
+                        }
+                    }
+
+                    // Upload Speed Box
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CyberBackground)
+                            .border(1.dp, if (progress.phase == SpeedTestPhase.UPLOAD) CyberAccent else CyberBorderSubtle, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = CyberAccent, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "UPLOAD",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = CyberTextMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val displayUl = if (progress.phase == SpeedTestPhase.UPLOAD && progress.currentSpeedMbps > 0) {
+                                progress.currentSpeedMbps
+                            } else {
+                                result?.uploadSpeedMbps ?: progress.uploadSpeedMbps
+                            }
+                            Text(
+                                text = "%.2f".format(Locale.US, displayUl),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextPrimary
+                            )
+                            Text(
+                                text = "Mbps" + (if (result != null) " (Peak: ${"%.1f".format(Locale.US, result.peakUploadMbps)})" else ""),
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberTextMuted
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Latency & Jitter Box Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    MetricMiniBox(
+                        label = "PING (LATENCY)",
+                        value = "${result?.pingMs ?: progress.pingMs} ms",
+                        color = CyberPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricMiniBox(
+                        label = "JITTER VARIANCE",
+                        value = "±${result?.jitterMs ?: progress.jitterMs} ms",
+                        color = CyberWarning,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (progress.isRunning) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    LinearProgressIndicator(
+                        progress = { progress.progressPercent },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = CyberAccent,
+                        trackColor = CyberBackground
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = progress.statusText,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextMuted
+                    )
+                }
+
+                if (result != null && !progress.isRunning) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(CyberSuccess.copy(alpha = 0.12f))
+                            .border(1.dp, CyberSuccess.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = CyberSuccess, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = result.rating,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberSuccess
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Action Button
+                if (progress.isRunning) {
+                    Button(
+                        onClick = onStop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberDanger),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "STOP SPEEDTEST",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = onStart,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Speed, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (result != null) "RE-TEST CONNECTION SPEED" else "START FULL SPEEDTEST",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StressAnd100MbSection(
+    stabProgress: StabilityProgress,
+    stabResult: TwoMinuteStabilityResult?,
+    onStartStability: () -> Unit,
+    onStopStability: () -> Unit,
+    dl100Progress: Download100MbProgress,
+    dl100Result: Download100MbResult?,
+    onStartDl100: () -> Unit,
+    onStopDl100: () -> Unit,
+    congestionProgress: CongestionStressProgress,
+    congestionResult: CongestionStressResult?,
+    onStartCongestion: () -> Unit,
+    onStopCongestion: () -> Unit,
+    streamingResult: StreamingBenchmarkResult?,
+    isTestingStreaming: Boolean,
+    onRunStreaming: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // 1. Two-Minute Deep Stability Audit Card
+        TwoMinuteStabilityCard(
+            progress = stabProgress,
+            result = stabResult,
+            onStart = onStartStability,
+            onStop = onStopStability
+        )
+
+        // 2. 100MB Download & Automatic Dev Report Card
+        Download100MbCard(
+            progress = dl100Progress,
+            result = dl100Result,
+            onStart = onStartDl100,
+            onStop = onStopDl100
+        )
+
+        // 3. Congestion & Bufferbloat Stress Card (Concurrent DL + UL)
+        CongestionStressCard(
+            progress = congestionProgress,
+            result = congestionResult,
+            onStart = onStartCongestion,
+            onStop = onStopCongestion
+        )
+
+        // 4. Video Streaming Buffer Simulation Card
+        StreamingSimulationCard(
+            result = streamingResult,
+            isTesting = isTestingStreaming,
+            onTestClick = onRunStreaming
+        )
+
+        Spacer(modifier = Modifier.height(30.dp))
+    }
+}
+
+@Composable
+private fun TwoMinuteStabilityCard(
+    progress: StabilityProgress,
+    result: TwoMinuteStabilityResult?,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    val remainingSec = (progress.totalSeconds - progress.elapsedSeconds).coerceAtLeast(0)
+    val timeFormatted = String.format(Locale.US, "%02d:%02d", remainingSec / 60, remainingSec % 60)
+
+    val currentGrade = result?.stabilityGrade ?: when {
+        progress.stabilityScorePercent >= 90 && progress.packetLossPercent <= 2.0 -> "ROCK SOLID (A+)"
+        progress.stabilityScorePercent >= 78 -> "STABLE (A)"
+        progress.stabilityScorePercent >= 62 -> "MODERATE (B)"
+        progress.stabilityScorePercent >= 45 -> "JITTER PRONE (C)"
+        progress.stabilityScorePercent > 0 -> "DEGRADED (D)"
+        else -> "IDLE"
+    }
+
+    val gradeColor = when {
+        currentGrade.contains("A") -> CyberSuccess
+        currentGrade.contains("B") -> CyberAccent
+        currentGrade.contains("C") -> CyberWarning
+        else -> CyberDanger
+    }
+
+    CyberCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = CyberCardElevated,
+        borderColor = if (progress.isRunning) CyberAccent else CyberBorder,
+        padding = 16.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.NetworkCheck,
+                        contentDescription = null,
+                        tint = CyberAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "2-MIN DEEP STABILITY AUDIT",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(gradeColor.copy(alpha = 0.15f))
+                        .border(1.dp, gradeColor.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = currentGrade,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = gradeColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Timer & Stability Score Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "REMAINING TIME",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextMuted
+                    )
+                    Text(
+                        text = timeFormatted,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (progress.isRunning) CyberAccent else CyberTextPrimary
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "STABILITY SCORE",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextMuted
+                    )
+                    Text(
+                        text = "${progress.stabilityScorePercent}%",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = gradeColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Progress Bar
+            LinearProgressIndicator(
+                progress = { progress.progressPercent },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = CyberAccent,
+                trackColor = CyberBackground
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Latency & Loss Metrics Grid
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MetricMiniBox(
+                    label = "AVG PING",
+                    value = "${progress.avgLatencyMs} ms",
+                    color = CyberTextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "JITTER",
+                    value = "±${progress.jitterMs} ms",
+                    color = CyberWarning,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "LOSS",
+                    value = "${"%.1f".format(Locale.US, progress.packetLossPercent)}%",
+                    color = if (progress.packetLossPercent > 5.0) CyberDanger else CyberSuccess,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "PROBES",
+                    value = "${progress.packetsReceived}/${progress.packetsSent}",
+                    color = CyberAccent,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Recent Ping Sparkline Bars
+            if (progress.recentPings.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "RECENT SAMPLES (LAST 20 PINGS)",
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = CyberTextMuted
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(30.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(CyberBackground)
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    progress.recentPings.forEach { ping ->
+                        val barHeight = ((ping.toFloat() / 350f).coerceIn(0.12f, 1f) * 26).dp
+                        val barColor = if (ping < 120) CyberSuccess else if (ping < 280) CyberWarning else CyberDanger
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(barHeight)
+                                .clip(RoundedCornerShape(1.dp))
+                                .background(barColor)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = progress.statusSummary,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                color = CyberTextMuted
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (progress.isRunning) {
+                Button(
+                    onClick = onStop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberDanger),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "STOP 2-MIN AUDIT",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            } else {
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (result != null) "RE-RUN 2-MIN STABILITY AUDIT" else "START 2-MIN STABILITY AUDIT",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Download100MbCard(
+    progress: Download100MbProgress,
+    result: Download100MbResult?,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    val mbReceived = progress.bytesReceived / (1024.0 * 1024.0)
+
+    CyberCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = CyberCardElevated,
+        borderColor = if (progress.isRunning) CyberAccent else CyberBorder,
+        padding = 16.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowDownward,
+                        contentDescription = null,
+                        tint = CyberAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "100MB DOWNLOAD & DEV REPORT",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(CyberAccent.copy(alpha = 0.15f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "ANYCAST CDN",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberAccent
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Payload Progress Meter
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "TRANSFERRED",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextMuted
+                    )
+                    Text(
+                        text = "${"%.1f".format(Locale.US, mbReceived)} MB / 100 MB",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "CURRENT SPEED",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextMuted
+                    )
+                    Text(
+                        text = "${"%.2f".format(Locale.US, progress.currentMbps)} Mbps",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberSuccess
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            LinearProgressIndicator(
+                progress = { progress.progressPercent },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = CyberSuccess,
+                trackColor = CyberBackground
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Speed stats grid
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricMiniBox(
+                    label = "AVERAGE",
+                    value = "${"%.2f".format(Locale.US, result?.avgSpeedMbps ?: progress.avgMbps)} Mbps",
+                    color = CyberTextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "PEAK SPEED",
+                    value = "${"%.2f".format(Locale.US, result?.peakSpeedMbps ?: progress.peakMbps)} Mbps",
+                    color = CyberAccent,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "TIME / ETA",
+                    value = "${progress.elapsedSeconds}s" + (if (progress.estimatedRemainingSeconds > 0) " (ETA ${progress.estimatedRemainingSeconds}s)" else ""),
+                    color = CyberWarning,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Dev Report VPS Sync Banner
+            if (result?.devReportUploaded == true) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(CyberSuccess.copy(alpha = 0.12f))
+                        .border(1.dp, CyberSuccess.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                        .padding(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null, tint = CyberSuccess, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "DEV REPORT #${result.devReportId} UPLOADED TO VPS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = CyberSuccess
+                            )
+                            Text(
+                                text = "Telemetry & 100MB benchmark metrics synchronized to VPS for analysis",
+                                fontSize = 8.sp,
+                                color = CyberTextMuted
+                            )
+                        }
+                    }
+                }
+            } else if (result?.devReportUploadError != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "VPS Report Upload Note: ${result.devReportUploadError}",
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = CyberWarning
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (progress.isRunning) {
+                Button(
+                    onClick = onStop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberDanger),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "STOP 100MB DOWNLOAD",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            } else {
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (result != null) "RE-RUN 100MB BENCHMARK" else "START 100MB DOWNLOAD & DEV DUMP",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CongestionStressCard(
+    progress: CongestionStressProgress,
+    result: CongestionStressResult?,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    val grade = result?.bufferbloatGrade ?: when {
+        progress.bufferbloatDeltaMs <= 15 -> "GRADE A+ (Zero Inflation)"
+        progress.bufferbloatDeltaMs <= 35 -> "GRADE A (Minimal Delay)"
+        progress.bufferbloatDeltaMs <= 70 -> "GRADE B (Mild Bloat)"
+        progress.bufferbloatDeltaMs <= 150 -> "GRADE C (Noticeable Delay)"
+        progress.bufferbloatDeltaMs <= 300 -> "GRADE D (Heavy Queuing)"
+        progress.bufferbloatDeltaMs > 0 -> "GRADE F (Bufferbloat Saturated)"
+        else -> "IDLE"
+    }
+
+    val gradeColor = when {
+        grade.contains("A") -> CyberSuccess
+        grade.contains("B") -> CyberAccent
+        grade.contains("C") -> CyberWarning
+        else -> CyberDanger
+    }
+
+    CyberCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = CyberCardElevated,
+        borderColor = if (progress.isRunning) CyberAccent else CyberBorder,
+        padding = 16.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = CyberAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "CONGESTION & BUFFERBLOAT STRESS",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextPrimary,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(gradeColor.copy(alpha = 0.15f))
+                        .border(1.dp, gradeColor.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = grade,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = gradeColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Simultaneously downloads & uploads data streams while measuring latency inflation under active load",
+                fontSize = 9.sp,
+                color = CyberTextMuted
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Ping Delta Comparison Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricMiniBox(
+                    label = "BASELINE IDLE PING",
+                    value = "${progress.baselineIdlePingMs} ms",
+                    color = CyberTextMuted,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "LOADED ACTIVE PING",
+                    value = "${progress.currentPingMs} ms",
+                    color = CyberTextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "BUFFERBLOAT DELTA",
+                    value = "+${progress.bufferbloatDeltaMs} ms",
+                    color = gradeColor,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Concurrent Throughput Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricMiniBox(
+                    label = "ACTIVE DOWNLOAD",
+                    value = "${"%.1f".format(Locale.US, progress.currentDownloadMbps)} Mbps",
+                    color = CyberSuccess,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "ACTIVE UPLOAD",
+                    value = "${"%.1f".format(Locale.US, progress.currentUploadMbps)} Mbps",
+                    color = CyberAccent,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniBox(
+                    label = "PACKET LOSS",
+                    value = "${"%.1f".format(Locale.US, progress.packetLossPercent)}%",
+                    color = if (progress.packetLossPercent > 3.0) CyberDanger else CyberTextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            if (progress.isRunning) {
+                Spacer(modifier = Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { progress.progressPercent },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = CyberAccent,
+                    trackColor = CyberBackground
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = progress.statusMessage,
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = CyberTextMuted
+                )
+            }
+
+            if (result?.recommendation != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(CyberBackground)
+                        .border(1.dp, CyberBorderSubtle, RoundedCornerShape(6.dp))
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = result.recommendation,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = CyberTextSecondary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (progress.isRunning) {
+                Button(
+                    onClick = onStop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberDanger),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "STOP STRESS TEST",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            } else {
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberPrimary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (result != null) "RE-RUN CONGESTION TEST" else "RUN CONGESTION STRESS TEST (30s)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricMiniBox(
+    label: String,
+    value: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(CyberBackground)
+            .border(1.dp, CyberBorderSubtle, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Column {
+            Text(
+                text = label,
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = CyberTextMuted
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = color
+            )
+        }
     }
 }
 
