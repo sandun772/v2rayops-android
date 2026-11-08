@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Blue Rounded Background Squircle -->
+    <path
+        android:fillColor="#2D8CFF"
+        android:pathData="M5,2 L19,2 A3,3 0 0,1 22,5 L22,19 A3,3 0 0,1 19,22 L5,22 A3,3 0 0,1 2,19 L2,5 A3,3 0 0,1 5,2 Z" />
+    <!-- White Video Camera Body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M6,8 C6,7.45 6.45,7 7,7 L13,7 C13.55,7 14,7.45 14,8 L14,16 C14,16.55 13.55,17 13,17 L7,17 C6.45,17 6,16.55 6,16 Z" />
+    <!-- White Camera Lens Cone -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15,10.2 L17.6,8.25 C17.9,8.02 18.3,8.23 18.3,8.6 L18.3,15.4 C18.3,15.77 17.9,15.98 17.6,15.75 L15,13.8 Z" />
+</vector>

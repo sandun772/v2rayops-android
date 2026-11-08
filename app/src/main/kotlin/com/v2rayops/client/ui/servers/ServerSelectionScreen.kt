@@ -1,5 +1,6 @@
 package com.v2rayops.client.ui.servers
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -92,12 +94,14 @@ fun ServerSelectionScreen(
     Scaffold(
         bottomBar = {
             ClientBottomNavBar(
-                selectedTab = ClientNavTab.NODES,
+                selectedTab = ClientNavTab.FINETUNE,
                 onTabSelected = { tab ->
                     when (tab) {
                         ClientNavTab.CONNECT -> onNavigateToHome()
-                        ClientNavTab.NODES -> { /* Already on Nodes */ }
-                        ClientNavTab.ROUTING -> onNavigateToRouting()
+                        ClientNavTab.FINETUNE -> { /* Already on Finetune */ }
+                        ClientNavTab.TOOLS -> onNavigateToRouting()
+                        ClientNavTab.USAGE -> { /* Handled on Dashboard */ }
+                        ClientNavTab.SETTINGS -> onBackClick()
                     }
                 }
             )
@@ -369,20 +373,19 @@ private fun NodeCardItem(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Package Icon Badge (instead of text SG/JP squircle)
+            // Authentic Brand Package Icon (Real Zoom, TikTok, YouTube, Gaming, etc.)
             Box(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(meta.iconTint.copy(alpha = 0.14f))
-                    .border(1.dp, meta.iconTint.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                    .background(Color(0xFF141C30))
+                    .border(1.dp, Color(0xFF222F4C), RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = meta.icon,
+                Image(
+                    painter = painterResource(id = meta.drawableRes),
                     contentDescription = meta.isp,
-                    tint = meta.iconTint,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 

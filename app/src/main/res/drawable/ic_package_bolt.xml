@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Indigo rounded background -->
+    <path
+        android:fillColor="#6366F1"
+        android:pathData="M5,2 L19,2 A3,3 0 0,1 22,5 L22,19 A3,3 0 0,1 19,22 L5,22 A3,3 0 0,1 2,19 L2,5 A3,3 0 0,1 5,2 Z" />
+    <!-- White Lightning Bolt -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M11.5,4 L6,13 H12 L11,20 L18,10 H12.5 Z" />
+</vector>

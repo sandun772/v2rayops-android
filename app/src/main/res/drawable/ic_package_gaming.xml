@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Purple Game Controller -->
+    <path
+        android:fillColor="#8B5CF6"
+        android:pathData="M21,6 H3 C1.9,6 1,6.9 1,8 V16 C1,17.1 1.9,18 3,18 H7 L9,16 H15 L17,18 H21 C22.1,18 23,17.1 23,16 V8 C23,6.9 22.1,6 21,6 Z" />
+    <!-- White D-Pad Cross -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M7,9 H5 V11 H3 V13 H5 V15 H7 V13 H9 V11 H7 Z" />
+    <!-- Action Buttons -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M16.5,13 A1,1 0 1,1 18.5,13 A1,1 0 1,1 16.5,13 Z M18.5,10 A1,1 0 1,1 20.5,10 A1,1 0 1,1 18.5,10 Z M14.5,10 A1,1 0 1,1 16.5,10 A1,1 0 1,1 14.5,10 Z M16.5,7 A1,1 0 1,1 18.5,7 A1,1 0 1,1 16.5,7 Z" />
+</vector>

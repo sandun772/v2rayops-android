@@ -1,9 +1,9 @@
 package com.v2rayops.client.ui.dashboard.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,11 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,17 +24,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.v2rayops.client.R
 import com.v2rayops.client.domain.model.VpnConfig
 
 data class ConfigPackageDetails(
-    val icon: ImageVector,
-    val iconTint: Color,
+    val drawableRes: Int,
     val isp: String,
     val limit: String
 )
@@ -47,8 +42,7 @@ data class ConfigPackageDetails(
 fun deriveConfigPackageDetails(config: VpnConfig?): ConfigPackageDetails {
     if (config == null) {
         return ConfigPackageDetails(
-            icon = Icons.Filled.Bolt,
-            iconTint = Color(0xFF6366F1),
+            drawableRes = R.drawable.ic_package_bolt,
             isp = "SELECT ISP",
             limit = "100 GB"
         )
@@ -71,28 +65,29 @@ fun deriveConfigPackageDetails(config: VpnConfig?): ConfigPackageDetails {
     val match = gbRegex.find(config.displayName) ?: gbRegex.find(config.remark)
     val limit = when {
         match != null -> match.value.uppercase()
-        "payg" in raw || "pay-as-you-go" in raw -> "PAYG"
+        "payg" in raw || "pay-as-you-go" in raw -> "PAYG (76.36 GB)"
         "unlimited" in raw -> "UNLIMITED"
         else -> "100 GB"
     }
 
-    // Contextual Package Icon matching package content
-    val (icon, tint) = when {
+    // Authentic Brand Package Icon (Real Zoom, TikTok, YouTube, Gaming, WhatsApp, Bolt)
+    val drawable = when {
         "zoom" in raw || "teams" in raw || "meet" in raw || "conference" in raw || "work" in raw || "learn" in raw ->
-            Icons.Filled.Videocam to Color(0xFF38BDF8) // Cyan for Video conferencing / Education
-        "youtube" in raw || "video" in raw || "tiktok" in raw || "stream" in raw ->
-            Icons.Filled.PlayArrow to Color(0xFFF43F5E) // Red for Streaming / TikTok
+            R.drawable.ic_package_zoom
+        "tiktok" in raw ->
+            R.drawable.ic_package_tiktok
+        "youtube" in raw || "video" in raw || "stream" in raw ->
+            R.drawable.ic_package_youtube
         "game" in raw || "free fire" in raw || "pubg" in raw || "cod" in raw ->
-            Icons.Filled.SportsEsports to Color(0xFFA855F7) // Purple for Gaming
+            R.drawable.ic_package_gaming
         "chat" in raw || "whatsapp" in raw || "social" in raw || "facebook" in raw ->
-            Icons.Filled.Forum to Color(0xFF10B981) // Green for Messaging / Social
+            R.drawable.ic_package_whatsapp
         else ->
-            Icons.Filled.Bolt to Color(0xFF6366F1) // Indigo for General routes
+            R.drawable.ic_package_bolt
     }
 
     return ConfigPackageDetails(
-        icon = icon,
-        iconTint = tint,
+        drawableRes = drawable,
         isp = isp,
         limit = limit
     )
@@ -124,20 +119,19 @@ fun ActiveNodeSummaryCard(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Package Icon Badge (Replacing text SG/JP squircle)
+            // Real Brand Package Icon Badge (Zoom, TikTok, YouTube, Gaming, WhatsApp)
             Box(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(meta.iconTint.copy(alpha = 0.14f))
-                    .border(1.dp, meta.iconTint.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                    .background(Color(0xFF0E1424))
+                    .border(1.dp, Color(0xFF1C2740), RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = meta.icon,
+                Image(
+                    painter = painterResource(id = meta.drawableRes),
                     contentDescription = meta.isp,
-                    tint = meta.iconTint,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 

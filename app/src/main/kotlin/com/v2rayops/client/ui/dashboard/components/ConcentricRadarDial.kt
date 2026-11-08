@@ -2,9 +2,9 @@ package com.v2rayops.client.ui.dashboard.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -51,7 +52,7 @@ fun ConcentricRadarDial(
     val isConnected = connectionState.isConnected
     val isConnecting = connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
-    // Blue to Dark Purple palette matching the theme
+    // Theme palette: Blue (#3B82F6) to Dark Purple (#312E81)
     val blueColor = Color(0xFF3B82F6)        // Vibrant Royal Blue
     val purpleColor = Color(0xFF6366F1)      // Electric Indigo
     val darkPurpleColor = Color(0xFF312E81)  // Deep Midnight Purple
@@ -62,28 +63,45 @@ fun ConcentricRadarDial(
         else -> "CONNECT"
     }
 
-    // Refined, subtle breathing animation for glow & dots
-    val infiniteTransition = rememberInfiniteTransition(label = "RadarThemeMotion")
+    // Smooth progressive entrance transition (prevents sudden snapping)
+    val connectionPhase by animateFloatAsState(
+        targetValue = when {
+            isConnected -> 1.0f
+            isConnecting -> 0.55f
+            else -> 0.0f
+        },
+        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+        label = "ConnectionPhase"
+    )
+
+    // Gentle, calming ambient breathing (no rapid, jarring blinking)
+    val infiniteTransition = rememberInfiniteTransition(label = "GentleRadarMotion")
 
     val breathPhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2800, easing = FastOutSlowInEasing),
+            animation = tween(3200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "BreathPhase"
+        label = "GentleBreath"
     )
 
-    // Smooth pulse scale on glow ring
+    // Smooth glow pulse
     val glowScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
-        targetValue = if (isConnected) 1.05f else if (isConnecting) 1.03f else 1.0f,
+        targetValue = if (isConnected) 1.04f else if (isConnecting) 1.02f else 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = FastOutSlowInEasing),
+            animation = tween(2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "GlowScale"
+    )
+
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isConnected) 0.30f else if (isConnecting) 0.20f else 0.0f,
+        animationSpec = tween(900, easing = FastOutSlowInEasing),
+        label = "GlowAlpha"
     )
 
     val density = LocalDensity.current
@@ -92,7 +110,7 @@ fun ConcentricRadarDial(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 280dp Box containing Concentric Dot Rings (orbit circle & satellites removed)
+        // 280dp Box containing Concentric Dot Rings (orbit circle & satellites completely removed)
         Box(
             modifier = Modifier
                 .size(280.dp)
@@ -116,25 +134,37 @@ fun ConcentricRadarDial(
                         val angleStep = (2 * Math.PI) / count
                         val normalizedRing = i.toFloat() / (ringRadii.size - 1).toFloat()
 
-                        // Color selection: Blue to Dark Purple gradient
+                        // Staggered outward cascade: inner rings animate first, outer rings follow
+                        val ringCascade = ((connectionPhase - (i * 0.10f)) / 0.60f).coerceIn(0f, 1f)
+
+                        // Theme-matched Blue to Dark Purple gradient across rings
+                        val connectedRingColor = when (i) {
+                            0 -> Color(0xFF3B82F6) // Inner ring: Royal Blue
+                            1 -> Color(0xFF4F46E5) // Indigo-Blue
+                            2 -> Color(0xFF6366F1) // Electric Indigo
+                            3 -> Color(0xFF4338CA) // Deep Purple-Indigo
+                            else -> darkPurpleColor // Outer ring: Dark Purple
+                        }
+
                         val baseDotColor = when {
                             isConnecting -> Color(0xFFF59E0B)
-                            isConnected -> {
-                                // Inner rings blue (#3B82F6), middle indigo (#6366F1), outer dark purple (#312E81)
-                                when (i) {
-                                    0, 1 -> blueColor
-                                    2, 3 -> purpleColor
-                                    else -> darkPurpleColor
-                                }
-                            }
+                            isConnected -> connectedRingColor
                             else -> Color(0xFF1E2D48)
                         }
 
-                        // Subtle, refined alpha: gentle breath without chaotic flashing
+                        // Smooth, non-jarring alpha with staggered entrance
                         val dotAlpha = when {
-                            isConnected -> (0.22f + 0.22f * breathPhase * (1f - normalizedRing * 0.4f)).coerceIn(0f, 1f)
-                            isConnecting -> (0.30f + 0.20f * breathPhase).coerceIn(0f, 1f)
-                            else -> (0.12f + 0.10f * (1f - normalizedRing)).coerceIn(0f, 1f)
+                            isConnected -> {
+                                val base = 0.18f + 0.18f * breathPhase * (1f - normalizedRing * 0.35f)
+                                (base * ringCascade).coerceIn(0f, 1f)
+                            }
+                            isConnecting -> {
+                                val base = 0.22f + 0.15f * breathPhase
+                                (base * ringCascade).coerceIn(0f, 1f)
+                            }
+                            else -> {
+                                (0.10f + 0.08f * (1f - normalizedRing)).coerceIn(0f, 1f)
+                            }
                         }
 
                         val dotRadiusPx = with(density) { 1.25.dp.toPx() }
@@ -154,42 +184,34 @@ fun ConcentricRadarDial(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Blue to Dark Purple Ambient Glow Ring behind the button (when connected)
-            if (isConnected) {
+            // Blue to Dark Purple Ambient Glow Ring behind the button (animated smoothly)
+            if (glowAlpha > 0.01f) {
+                val glowColors = if (isConnecting) {
+                    listOf(
+                        Color(0xFFF59E0B).copy(alpha = glowAlpha * 0.7f),
+                        Color.Transparent
+                    )
+                } else {
+                    listOf(
+                        blueColor.copy(alpha = glowAlpha * 0.8f),
+                        purpleColor.copy(alpha = glowAlpha * 0.5f),
+                        darkPurpleColor.copy(alpha = glowAlpha * 0.25f),
+                        Color.Transparent
+                    )
+                }
+
                 Box(
                     modifier = Modifier
-                        .size(162.dp)
+                        .size(164.dp)
                         .scale(glowScale)
                         .clip(CircleShape)
                         .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    blueColor.copy(alpha = 0.22f),
-                                    purpleColor.copy(alpha = 0.16f),
-                                    darkPurpleColor.copy(alpha = 0.08f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-            } else if (isConnecting) {
-                Box(
-                    modifier = Modifier
-                        .size(156.dp)
-                        .scale(glowScale)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    Color(0xFFF59E0B).copy(alpha = 0.18f),
-                                    Color.Transparent
-                                )
-                            )
+                            Brush.radialGradient(colors = glowColors)
                         )
                 )
             }
 
-            // Center Power Button — 146dp circular disc with Blue to Dark Purple gradient border
+            // Center Power Button — 146dp circular disc with subtle glass sheen & Blue/Dark Purple border
             val borderBrush = when {
                 isConnecting -> Brush.verticalGradient(
                     colors = listOf(Color(0xFFF59E0B), Color(0xFFD97706))
@@ -212,11 +234,35 @@ fun ConcentricRadarDial(
                 else -> Color(0xFF64748B)
             }
 
+            // Subtle glassy button: frosted obsidian base + top rim specular crescent
             Box(
                 modifier = Modifier
                     .size(146.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF090D1A))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF141C30), // subtle frosted navy glass top
+                                Color(0xFF080C17)  // deep obsidian base
+                            )
+                        )
+                    )
+                    .drawBehind {
+                        // "Tiny bit little glassy not much" specular crescent on the upper rim
+                        drawArc(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x35FFFFFF), // delicate top rim light reflection
+                                    Color(0x0AFFFFFF),
+                                    Color.Transparent
+                                )
+                            ),
+                            startAngle = 180f,
+                            sweepAngle = 180f,
+                            useCenter = false,
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                    }
                     .border(
                         width = 2.5.dp,
                         brush = borderBrush,

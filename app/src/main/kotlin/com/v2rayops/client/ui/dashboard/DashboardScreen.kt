@@ -29,14 +29,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.v2rayops.client.domain.model.ConnectionState
 import com.v2rayops.client.ui.dashboard.components.ActiveNodeSummaryCard
-import com.v2rayops.client.ui.dashboard.components.AppProxyMode
 import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
 import com.v2rayops.client.ui.dashboard.components.ClientNavTab
 import com.v2rayops.client.ui.dashboard.components.ConcentricRadarDial
 import com.v2rayops.client.ui.dashboard.components.DigitalTimerText
 import com.v2rayops.client.ui.dashboard.components.ProxyModeSelector
 import com.v2rayops.client.ui.dashboard.components.SpeedDividedSection
+import com.v2rayops.client.ui.dashboard.components.SpeedOptimizationMode
 import com.v2rayops.client.ui.dashboard.components.StatusPill
+import com.v2rayops.client.ui.dashboard.components.UsageCockpitDialog
 import com.v2rayops.client.ui.dashboard.components.V2RayOpsTopBar
 
 @Composable
@@ -54,7 +55,8 @@ fun DashboardScreen(
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
 
-    var proxyMode by remember { mutableStateOf(AppProxyMode.RULE) }
+    var speedMode by remember { mutableStateOf(SpeedOptimizationMode.BALANCED) }
+    var showUsageCockpit by remember { mutableStateOf(false) }
 
     val vpnPrepareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -86,8 +88,10 @@ fun DashboardScreen(
                 onTabSelected = { tab ->
                     when (tab) {
                         ClientNavTab.CONNECT -> { /* Already on Connect */ }
-                        ClientNavTab.NODES -> onNavigateToServers()
-                        ClientNavTab.ROUTING -> onNavigateToRouteFinder()
+                        ClientNavTab.FINETUNE -> onNavigateToServers()
+                        ClientNavTab.USAGE -> showUsageCockpit = true
+                        ClientNavTab.TOOLS -> onNavigateToRouteFinder()
+                        ClientNavTab.SETTINGS -> onNavigateToSettings()
                     }
                 }
             )
@@ -109,7 +113,7 @@ fun DashboardScreen(
             // 2. Big Digital Clock (00:00:00 or 01:24:37)
             DigitalTimerText(connectionState = connectionState)
 
-            // 3. Center Concentric Dot Radar & Satellite Orbit Dial
+            // 3. Center Concentric Dot Radar Dial (Smooth progressive wave entrance, subtle glassy power button)
             ConcentricRadarDial(
                 connectionState = connectionState,
                 onClick = handleConnectClick
@@ -121,20 +125,31 @@ fun DashboardScreen(
                 trafficStats = trafficStats
             )
 
-            // 5. Active Node Summary Card ([JP] Tokyo 03 • 48 ms >)
+            // 5. Active Node Summary Card (Real brand icons & ISP / Limit display)
             ActiveNodeSummaryCard(
                 config = selectedConfig,
                 pingMs = pingMs,
                 onClick = onNavigateToServers
             )
 
-            // 6. PROXY MODE Segmented Control (Rule / Global / Direct)
+            // 6. SPEED & OPTIMIZATION MODE Segmented Control (Balanced / Speed / Stability)
             ProxyModeSelector(
-                selectedMode = proxyMode,
-                onModeSelected = { proxyMode = it }
+                selectedMode = speedMode,
+                onModeSelected = { speedMode = it }
             )
 
             Spacer(modifier = Modifier.height(6.dp))
+        }
+
+        // Usage & Cockpit Telemetry Modal (matching web dashboard widgets)
+        if (showUsageCockpit) {
+            UsageCockpitDialog(
+                connectionState = connectionState,
+                trafficStats = trafficStats,
+                selectedConfig = selectedConfig,
+                pingMs = pingMs,
+                onDismiss = { showUsageCockpit = false }
+            )
         }
     }
 }

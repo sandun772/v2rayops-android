@@ -27,24 +27,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class AppProxyMode(val label: String) {
-    RULE("Rule"),
-    GLOBAL("Global"),
-    DIRECT("Direct")
+enum class SpeedOptimizationMode(val label: String, val description: String) {
+    BALANCED("Balanced", "Balanced routing"),
+    SPEED("Speed", "Max download & upload throughput"),
+    STABILITY("Stability", "Ultra-low jitter & latency")
 }
+
+// Deprecated alias for backwards compatibility if needed
+typealias AppProxyMode = SpeedOptimizationMode
 
 @Composable
 fun ProxyModeSelector(
-    selectedMode: AppProxyMode,
-    onModeSelected: (AppProxyMode) -> Unit,
+    selectedMode: SpeedOptimizationMode,
+    onModeSelected: (SpeedOptimizationMode) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier.fillMaxWidth()
     ) {
-        // Label: PROXY MODE
+        // Label: SPEED & OPTIMIZATION MODE
         Text(
-            text = "PROXY MODE",
+            text = "SPEED & OPTIMIZATION MODE",
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
@@ -53,7 +56,7 @@ fun ProxyModeSelector(
             modifier = Modifier.padding(bottom = 6.dp)
         )
 
-        // Segmented Control Capsule
+        // Segmented Control Capsule (Balanced | Speed | Stability)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -64,13 +67,15 @@ fun ProxyModeSelector(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AppProxyMode.entries.forEach { mode ->
+            SpeedOptimizationMode.entries.forEach { mode ->
                 val isSelected = mode == selectedMode
                 val bg by animateColorAsState(
-                    targetValue = if (isSelected) Color(0xFF5856D6) else Color.Transparent
+                    targetValue = if (isSelected) Color(0xFF6366F1) else Color.Transparent,
+                    label = "ModeBg"
                 )
                 val textColor by animateColorAsState(
-                    targetValue = if (isSelected) Color.White else Color(0xFF64748B)
+                    targetValue = if (isSelected) Color.White else Color(0xFF64748B),
+                    label = "ModeTextColor"
                 )
 
                 Box(
