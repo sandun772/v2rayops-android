@@ -82,6 +82,14 @@ fun AppNavGraph(
             ServerSelectionScreen(
                 onBackClick = {
                     navController.popBackStack()
+                },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
+                },
+                onNavigateToRouting = {
+                    navController.navigate(Screen.RouteFinder.route)
                 }
             )
         }

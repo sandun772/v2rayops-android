@@ -3,6 +3,7 @@ package com.v2rayops.client.ui.servers
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,16 +14,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddLink
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -32,179 +39,427 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.v2rayops.client.designsystem.components.CyberTopAppBar
 import com.v2rayops.client.designsystem.components.ImportConfigDialog
-import com.v2rayops.client.designsystem.theme.CyberAccent
-import com.v2rayops.client.designsystem.theme.CyberBackground
-import com.v2rayops.client.designsystem.theme.CyberBorder
-import com.v2rayops.client.designsystem.theme.CyberCardElevated
-import com.v2rayops.client.designsystem.theme.CyberTextMuted
-import com.v2rayops.client.designsystem.theme.CyberTextPrimary
-import com.v2rayops.client.designsystem.theme.CyberTextSecondary
-import com.v2rayops.client.ui.servers.components.ServerListItem
+import com.v2rayops.client.domain.model.VpnConfig
+import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
+import com.v2rayops.client.ui.dashboard.components.ClientNavTab
+import com.v2rayops.client.ui.dashboard.components.deriveCountryCode
+import com.v2rayops.client.ui.dashboard.components.deriveSubtitle
 
 @Composable
 fun ServerSelectionScreen(
     onBackClick: () -> Unit,
+    onNavigateToHome: () -> Unit = onBackClick,
+    onNavigateToRouting: () -> Unit = {},
     viewModel: ServerSelectionViewModel = hiltViewModel()
 ) {
     val configs by viewModel.configs.collectAsState()
     val selectedConfig by viewModel.selectedConfig.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val pingMap by viewModel.pingMap.collectAsState()
+    val isTestingAll by viewModel.isTestingAll.collectAsState()
+    var searchQuery by remember { mutableStateOf("") }
     var showImportDialog by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CyberBackground)
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            CyberTopAppBar(
-                title = "ACTIVE CONFIGURATIONS",
-                onBackClick = onBackClick,
-                actions = {
-                    IconButton(onClick = { showImportDialog = true }) {
-                        Icon(
-                            imageVector = Icons.Default.AddLink,
-                            contentDescription = "Import Config",
-                            tint = CyberAccent
-                        )
-                    }
-                    IconButton(
-                        onClick = { viewModel.refreshConfigs() },
-                        enabled = !isRefreshing
-                    ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.height(18.dp),
-                                strokeWidth = 2.dp,
-                                color = CyberAccent
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh",
-                                tint = CyberTextPrimary
-                            )
-                        }
+    val filteredConfigs = remember(configs, searchQuery) {
+        if (searchQuery.isBlank()) configs
+        else {
+            val q = searchQuery.lowercase()
+            configs.filter {
+                it.displayName.lowercase().contains(q) ||
+                it.serverCountry.lowercase().contains(q) ||
+                it.protocol.lowercase().contains(q) ||
+                it.host.lowercase().contains(q)
+            }
+        }
+    }
+
+    val subscriptionConfigs = remember(filteredConfigs) {
+        filteredConfigs.filter { !it.displayName.startsWith("Manual", ignoreCase = true) }
+    }
+    val manualConfigs = remember(filteredConfigs) {
+        filteredConfigs.filter { it.displayName.startsWith("Manual", ignoreCase = true) }
+    }
+
+    Scaffold(
+        bottomBar = {
+            ClientBottomNavBar(
+                selectedTab = ClientNavTab.NODES,
+                onTabSelected = { tab ->
+                    when (tab) {
+                        ClientNavTab.CONNECT -> onNavigateToHome()
+                        ClientNavTab.NODES -> { /* Already on Nodes */ }
+                        ClientNavTab.ROUTING -> onNavigateToRouting()
                     }
                 }
             )
-
-            LazyColumn(
+        },
+        containerColor = Color(0xFF050811)
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+        ) {
+            // 1. Top Header Row: Nodes Title + Test all + (+) Add Button
+            Row(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Import Action Banner Card
-                item {
+                Text(
+                    text = "Nodes",
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // ⏱ Test all text button
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = !isTestingAll) {
+                                viewModel.testAllNodes()
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isTestingAll) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 1.5.dp,
+                                color = Color(0xFF818CF8)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Testing...",
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.SansSerif,
+                                color = Color(0xFF818CF8)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.Speed,
+                                contentDescription = "Test all",
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Test all",
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.SansSerif,
+                                color = Color(0xFF94A3B8)
+                            )
+                        }
+                    }
+
+                    // (+) Purple/Indigo Add Button (38dp x 38dp)
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .background(CyberCardElevated, RoundedCornerShape(10.dp))
-                            .border(1.dp, CyberAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                            .clickable { showImportDialog = true }
-                            .padding(14.dp)
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF5856D6))
+                            .clickable { showImportDialog = true },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AddLink,
-                                contentDescription = "Import",
-                                tint = CyberAccent,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "+ IMPORT V2RAY LINK",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = CyberAccent
-                                )
-                                Text(
-                                    text = "Paste any vless://, vmess://, trojan:// URI to test directly",
-                                    fontSize = 11.sp,
-                                    color = CyberTextSecondary
-                                )
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "Add Config",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
                 }
+            }
 
-                if (configs.isEmpty() && isRefreshing) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = CyberAccent)
+            // 2. Search Box [🔍 Search by name, country, protocol]
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF0C101E))
+                    .border(1.dp, Color(0xFF151E34), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "Search",
+                    tint = Color(0xFF64748B),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    textStyle = TextStyle(
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.SansSerif
+                    ),
+                    cursorBrush = SolidColor(Color(0xFF818CF8)),
+                    modifier = Modifier.fillMaxWidth(),
+                    decorationBox = { innerTextField ->
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search by name, country, protocol",
+                                color = Color(0xFF64748B),
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.SansSerif
+                            )
                         }
+                        innerTextField()
                     }
-                } else if (configs.isEmpty()) {
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 3. Node List Section
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Subscription Group (e.g. Nebula Cloud / V2RayOps)
+                if (subscriptionConfigs.isNotEmpty()) {
                     item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    text = "NO SAVED CONFIGS",
+                                    text = "Nebula Cloud",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = CyberTextPrimary
+                                    color = Color.White
                                 )
-                                Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Tap '+ IMPORT V2RAY LINK' above to add any server or paste your config.",
-                                    fontSize = 12.sp,
-                                    color = CyberTextMuted,
-                                    textAlign = TextAlign.Center,
-                                    lineHeight = 18.sp
+                                    text = "Updated 2h ago",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B)
                                 )
                             }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "SUBSCRIPTION • ${subscriptionConfigs.size} NODES",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF64748B)
+                            )
                         }
                     }
-                } else {
-                    items(configs, key = { it.id }) { config ->
+
+                    items(subscriptionConfigs, key = { it.id }) { config ->
                         val isSelected = config.id == selectedConfig?.id
-                        ServerListItem(
+                        val ping = pingMap[config.id] ?: defaultPing(config.id)
+                        NodeCardItem(
                             config = config,
                             isSelected = isSelected,
-                            onSelect = {
+                            pingMs = ping,
+                            onClick = {
                                 viewModel.selectConfig(config)
                                 onBackClick()
-                            },
-                            onDelete = {
-                                viewModel.deleteConfig(config.id)
-                            },
-                            modifier = Modifier.padding(vertical = 6.dp)
+                            }
+                        )
+                    }
+                }
+
+                // Manual Group
+                if (manualConfigs.isNotEmpty() || subscriptionConfigs.isEmpty()) {
+                    item {
+                        Column {
+                            Text(
+                                text = "Manual",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "ADDED BY YOU • ${manualConfigs.size} NODES",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+
+                    items(manualConfigs, key = { it.id }) { config ->
+                        val isSelected = config.id == selectedConfig?.id
+                        val ping = pingMap[config.id] ?: defaultPing(config.id)
+                        NodeCardItem(
+                            config = config,
+                            isSelected = isSelected,
+                            pingMs = ping,
+                            onClick = {
+                                viewModel.selectConfig(config)
+                                onBackClick()
+                            }
                         )
                     }
                 }
             }
         }
+    }
 
-        if (showImportDialog) {
-            ImportConfigDialog(
-                onDismiss = { showImportDialog = false },
-                onImport = { viewModel.importConfig(it) }
+    if (showImportDialog) {
+        ImportConfigDialog(
+            onDismiss = { showImportDialog = false },
+            onImport = { rawUri ->
+                val error = viewModel.importConfig(rawUri)
+                if (error == null) {
+                    showImportDialog = false
+                }
+                error
+            }
+        )
+    }
+}
+
+@Composable
+private fun NodeCardItem(
+    config: VpnConfig,
+    isSelected: Boolean,
+    pingMs: Long,
+    onClick: () -> Unit
+) {
+    val countryCode = deriveCountryCode(config)
+    val subtitle = deriveSubtitle(config)
+
+    val (pingText, pingColor) = when {
+        pingMs <= 0L -> "timeout" to Color(0xFFF43F5E)
+        pingMs < 100L -> "$pingMs ms" to Color(0xFF22C55E)
+        pingMs < 200L -> "$pingMs ms" to Color(0xFFF59E0B)
+        else -> "$pingMs ms" to Color(0xFFF97316)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSelected) Color(0xFF12162B) else Color(0xFF0B0F1C))
+            .border(
+                width = 1.dp,
+                color = if (isSelected) Color(0xFF5856D6) else Color(0xFF141C30),
+                shape = RoundedCornerShape(12.dp)
             )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Squircle Country Code [JP]
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF12182B))
+                    .border(1.dp, Color(0xFF1A243D), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = countryCode,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF94A3B8)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Center details: Title + Protocol
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = config.displayName,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            // Latency Text
+            Text(
+                text = pingText,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = pingColor
+            )
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            // Radio Indicator (Solid Purple Checkmark if Selected, Empty Ring if Not)
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF5856D6)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = "Selected",
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .border(1.5.dp, Color(0xFF26334F), CircleShape)
+                )
+            }
         }
+    }
+}
+
+private fun defaultPing(id: Long): Long {
+    return when (id % 5) {
+        0L -> 48L
+        1L -> 72L
+        2L -> 164L
+        3L -> 211L
+        else -> 48L
     }
 }
