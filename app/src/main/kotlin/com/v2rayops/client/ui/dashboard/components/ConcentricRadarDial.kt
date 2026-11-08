@@ -17,10 +17,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.outlined.Laptop
+import androidx.compose.material.icons.outlined.Smartphone
+import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,9 +50,10 @@ import kotlin.math.sin
 
 /**
  * Concentric Radar Dial matching reference design:
- * - 5 Concentric rings of dots clustered as a halo around the 130dp center button (ending at ~106dp radius)
+ * - 5 Concentric rings of dots clustered tightly as a halo around the 130dp center button (ending at ~105dp radius)
  * - Clean dark space between the dots and orbit circles (ZERO overlap!)
- * - 2 High-tech dashed circular orbital tracks positioned outside the dot field (inner at ~132dp, outer at ~156dp)
+ * - 2 High-tech dashed circular orbital tracks positioned outside the dot field (inner at 125dp, outer at 148dp)
+ * - 3 Satellite device badges (Laptop top-right, Phone bottom-left, TV bottom-left) with active green status dots
  * - Flat matte obsidian center power button (130dp) with razor-sharp 2dp border
  * - Luminous power icon and monospace action text (CONNECT / CANCEL / STOP)
  */
@@ -114,7 +119,7 @@ fun ConcentricRadarDial(
         else -> "CONNECT"
     }
 
-    // State transition progress (0f disconnected -> 0.6f connecting -> 1f connected)
+    // State transition progress (0f disconnected -> 0.65f connecting -> 1f connected)
     val stateProgress by animateFloatAsState(
         targetValue = when {
             isConnected -> 1.0f
@@ -155,10 +160,10 @@ fun ConcentricRadarDial(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 320dp Radar Field Container
+        // 340dp Radar Field Container
         Box(
             modifier = Modifier
-                .size(320.dp)
+                .size(340.dp)
                 .drawBehind {
                     val cx = size.width / 2f
                     val cy = size.height / 2f
@@ -166,31 +171,29 @@ fun ConcentricRadarDial(
                     // Center button radius = 65dp (130dp diameter)
                     val buttonRadius = 65.dp.toPx()
 
-                    // 5 Concentric Rings of Dots clustered tightly around the button (from 72dp to 106dp)
-                    // Exactly matching reference: R0 * 1.11, 1.27, 1.41, 1.54, 1.63
+                    // 5 Concentric Rings of Dots clustered tightly around the button (from 73dp to 105dp)
                     val dotRadii = listOf(
                         buttonRadius * 1.12f, // Ring 0: ~73dp
-                        buttonRadius * 1.26f, // Ring 1: ~82dp
-                        buttonRadius * 1.39f, // Ring 2: ~90dp
-                        buttonRadius * 1.51f, // Ring 3: ~98dp
-                        buttonRadius * 1.63f  // Ring 4: ~106dp
+                        buttonRadius * 1.25f, // Ring 1: ~81dp
+                        buttonRadius * 1.37f, // Ring 2: ~89dp
+                        buttonRadius * 1.49f, // Ring 3: ~97dp
+                        buttonRadius * 1.61f  // Ring 4: ~105dp
                     )
                     val dotCounts = listOf(24, 30, 36, 42, 48)
 
                     // 2 Concentric Orbital Track Radii (Dashed lines, well outside the dots with clean empty space!)
-                    // Exactly matching reference: R0 * 2.03 and R0 * 2.40
-                    val orbitInnerRadius = buttonRadius * 2.03f // ~132dp (clean gap of ~26dp from outer dots)
-                    val orbitOuterRadius = buttonRadius * 2.40f // ~156dp (outer track)
+                    val orbitInnerRadius = 125.dp.toPx()
+                    val orbitOuterRadius = 148.dp.toPx()
 
                     // --- 1. Draw 2 Dashed Orbital Track Circles in Clean Dark Space ---
                     val orbitColor = when {
-                        isConnected -> Color(0xFF2B3356).copy(alpha = 0.55f)
-                        isConnecting -> Color(0xFF3E3722).copy(alpha = 0.55f)
-                        else -> Color(0xFF172033).copy(alpha = 0.40f)
+                        isConnected -> Color(0xFF323B60)
+                        isConnecting -> Color(0xFF483D24)
+                        else -> Color(0xFF1E263D)
                     }
 
                     val dashEffect = PathEffect.dashPathEffect(
-                        floatArrayOf(4.dp.toPx(), 7.dp.toPx()),
+                        floatArrayOf(3.dp.toPx(), 6.dp.toPx()),
                         0f
                     )
 
@@ -201,7 +204,7 @@ fun ConcentricRadarDial(
                             radius = orbitInnerRadius,
                             center = Offset(cx, cy),
                             style = Stroke(
-                                width = 1.dp.toPx(),
+                                width = 1.2.dp.toPx(),
                                 pathEffect = dashEffect
                             )
                         )
@@ -210,11 +213,11 @@ fun ConcentricRadarDial(
                     // Outer orbit circle (counter-rotating for sci-fi radar depth)
                     rotate(degrees = -orbitRotation * 0.65f, pivot = Offset(cx, cy)) {
                         drawCircle(
-                            color = orbitColor.copy(alpha = orbitColor.alpha * 0.85f),
+                            color = orbitColor.copy(alpha = 0.85f),
                             radius = orbitOuterRadius,
                             center = Offset(cx, cy),
                             style = Stroke(
-                                width = 1.dp.toPx(),
+                                width = 1.2.dp.toPx(),
                                 pathEffect = dashEffect
                             )
                         )
@@ -266,6 +269,33 @@ fun ConcentricRadarDial(
                 },
             contentAlignment = Alignment.Center
         ) {
+            // Satellite Device 1: Laptop (Outer orbit, top-right at -36°)
+            SatelliteDeviceBadge(
+                icon = Icons.Outlined.Laptop,
+                isActive = isConnected,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(x = 117.dp, y = (-87).dp)
+            )
+
+            // Satellite Device 2: Smartphone (Inner orbit, bottom-left at 124°)
+            SatelliteDeviceBadge(
+                icon = Icons.Outlined.Smartphone,
+                isActive = isConnected,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(x = (-70).dp, y = 104.dp)
+            )
+
+            // Satellite Device 3: TV (Outer orbit, bottom-left at 140°)
+            SatelliteDeviceBadge(
+                icon = Icons.Outlined.Tv,
+                isActive = isConnected,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(x = (-113).dp, y = 95.dp)
+            )
+
             // Center Power Button — Flat Matte Obsidian disc (130dp) with razor-sharp 2dp border
             Box(
                 modifier = Modifier
@@ -305,5 +335,38 @@ fun ConcentricRadarDial(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SatelliteDeviceBadge(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isActive: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(Color(0xFF090D1A))
+            .border(1.5.dp, Color(0xFF3F3E82), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Color(0xFFA5B4FC),
+            modifier = Modifier.size(16.dp)
+        )
+        // Green active indicator dot with crisp dark border
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 1.dp, y = (-1).dp)
+                .clip(CircleShape)
+                .background(if (isActive) Color(0xFF22C55E) else Color(0xFF475569))
+                .border(1.dp, Color(0xFF050811), CircleShape)
+        )
     }
 }

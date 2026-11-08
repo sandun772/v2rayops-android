@@ -50,23 +50,58 @@ class DashboardViewModel @Inject constructor(
     private val _diagnosticResult = MutableStateFlow<ConnectionDiagnosticResult?>(null)
     val diagnosticResult: StateFlow<ConnectionDiagnosticResult?> = _diagnosticResult.asStateFlow()
 
+    private val _livePingMs = MutableStateFlow<Long?>(null)
+    val livePingMs: StateFlow<Long?> = _livePingMs.asStateFlow()
+
     private val _isTestingConnection = MutableStateFlow(false)
     val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
 
     init {
         refreshDashboard()
         observeConnectionForDiagnostics()
+        observeConfigForPing()
+    }
+
+    private fun observeConfigForPing() {
+        viewModelScope.launch {
+            selectedConfig.collect { cfg ->
+                if (cfg != null) {
+                    val ping = diagnosticsManager.measureEdgePing(cfg)
+                    if (ping > 0) {
+                        _livePingMs.value = ping
+                    }
+                }
+            }
+        }
+    }
+
+    fun refreshLivePing() {
+        viewModelScope.launch {
+            val cfg = selectedConfig.value ?: return@launch
+            val ping = diagnosticsManager.measureEdgePing(cfg)
+            if (ping > 0) {
+                _livePingMs.value = ping
+            }
+        }
     }
 
     private fun observeConnectionForDiagnostics() {
         viewModelScope.launch {
             connectionState.collect { state ->
                 if (state is ConnectionState.Connected) {
-                    // Small delay to ensure tunnel socket is fully warmed up
+                    // Quick edge ping immediately upon connect
+                    refreshLivePing()
+                    // Small delay to ensure tunnel socket is fully warmed up before full route test
                     delay(1200)
                     runConnectionTest()
+                    // While connected, periodically refresh live ping
+                    while (connectionState.value is ConnectionState.Connected) {
+                        delay(12000)
+                        refreshLivePing()
+                    }
                 } else if (state is ConnectionState.Disconnected) {
                     _diagnosticResult.value = null
+                    refreshLivePing()
                 }
             }
         }

@@ -96,7 +96,7 @@ fun deriveConfigPackageDetails(config: VpnConfig?): ConfigPackageDetails {
 @Composable
 fun ActiveNodeSummaryCard(
     config: VpnConfig?,
-    pingMs: Long = 48L,
+    pingMs: Long? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -104,7 +104,13 @@ fun ActiveNodeSummaryCard(
     val title = config?.displayName?.ifBlank { "Tokyo 03" } ?: "Tokyo 03"
     // User instruction: "dont show the remarks show the config isp and limit in remarks"
     val subtitle = "${meta.isp} • ${meta.limit}"
-    val pingDisplay = if (pingMs > 0) "$pingMs ms" else "48 ms"
+    val (pingDisplay, pingColor) = when {
+        pingMs == null -> "-- ms" to Color(0xFF64748B)
+        pingMs <= 0L -> "-- ms" to Color(0xFF64748B)
+        pingMs < 100L -> "$pingMs ms" to Color(0xFF22C55E)
+        pingMs < 200L -> "$pingMs ms" to Color(0xFFF59E0B)
+        else -> "$pingMs ms" to Color(0xFFF97316)
+    }
 
     Box(
         modifier = modifier
@@ -172,7 +178,7 @@ fun ActiveNodeSummaryCard(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF22C55E)
+                    color = pingColor
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(

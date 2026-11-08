@@ -44,7 +44,7 @@ fun UsageCockpitDialog(
     connectionState: ConnectionState,
     trafficStats: TrafficStats,
     selectedConfig: VpnConfig?,
-    pingMs: Long,
+    pingMs: Long? = null,
     onDismiss: () -> Unit
 ) {
     BasicAlertDialog(
@@ -273,12 +273,18 @@ fun UsageCockpitDialog(
                                 color = Color(0xFF64748B)
                             )
                             Spacer(modifier = Modifier.height(2.dp))
+                            val pingDisplay = if (pingMs != null && pingMs > 0) "$pingMs ms" else "-- ms"
+                            val pingColor = when {
+                                pingMs == null || pingMs <= 0 -> Color(0xFF64748B)
+                                pingMs < 100 -> Color(0xFF34D399)
+                                else -> Color(0xFFF59E0B)
+                            }
                             Text(
-                                text = "$pingMs ms",
+                                text = pingDisplay,
                                 fontSize = 14.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = if (pingMs < 100) Color(0xFF34D399) else Color(0xFFF59E0B)
+                                color = pingColor
                             )
                         }
                     }

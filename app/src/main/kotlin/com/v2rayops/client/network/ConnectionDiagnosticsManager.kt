@@ -270,16 +270,23 @@ class ConnectionDiagnosticsManager @Inject constructor(
     }
 
     /**
-     * Measures low-latency TCP edge ping to the server endpoint (returns round-trip in ms, e.g. 80-160ms).
+     * Measures low-latency TCP edge ping to the server endpoint (returns round-trip in ms, e.g. 70-160ms).
      */
     suspend fun measureEdgePing(targetConfig: VpnConfig?): Long = withContext(dispatchers.io) {
         val rawHost = targetConfig?.host?.ifBlank { "v2rayops.vpnxhub.com" } ?: "v2rayops.vpnxhub.com"
-        val port = targetConfig?.port ?: 443
+        val port = targetConfig?.port?.takeIf { it > 0 } ?: 443
         val targetIp = if (rawHost.contains("vpnxhub.com", ignoreCase = true)) "172.236.134.215" else rawHost
+        val resolved = try {
+            InetAddress.getByName(targetIp)
+        } catch (_: Exception) {
+            null
+        } ?: return@withContext -1L
+
         val start = System.currentTimeMillis()
         try {
             Socket().use { socket ->
-                socket.connect(InetSocketAddress(targetIp, port), 2500)
+                socket.tcpNoDelay = true
+                socket.connect(InetSocketAddress(resolved, port), 2500)
             }
             (System.currentTimeMillis() - start).coerceAtLeast(1L)
         } catch (e: Exception) {

@@ -4,7 +4,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,9 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,7 +48,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.v2rayops.client.designsystem.components.ImportConfigDialog
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
 import com.v2rayops.client.ui.dashboard.components.ClientNavTab
@@ -70,7 +66,6 @@ fun ServerSelectionScreen(
     val isTestingAll by viewModel.isTestingAll.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
-    var showImportDialog by remember { mutableStateOf(false) }
 
     val filteredConfigs = remember(configs, searchQuery) {
         if (searchQuery.isBlank()) configs
@@ -83,13 +78,6 @@ fun ServerSelectionScreen(
                 it.host.lowercase().contains(q)
             }
         }
-    }
-
-    val subscriptionConfigs = remember(filteredConfigs) {
-        filteredConfigs.filter { !it.displayName.startsWith("Manual", ignoreCase = true) }
-    }
-    val manualConfigs = remember(filteredConfigs) {
-        filteredConfigs.filter { it.displayName.startsWith("Manual", ignoreCase = true) }
     }
 
     Scaffold(
@@ -117,7 +105,7 @@ fun ServerSelectionScreen(
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
-            // 1. Top Header Row: Nodes Title + Test all + (+) Add Button
+            // 1. Top Header Row: "Active Configs" Title + Functional "Test all" Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -126,70 +114,52 @@ fun ServerSelectionScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Nodes",
-                    fontSize = 26.sp,
+                    text = "Active Configs",
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
 
+                // ⏱ Functional Live Edge TCP Socket Test All Button
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    // ⏱ Test all text button
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = !isTestingAll) {
-                                viewModel.testAllNodes()
-                            }
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (isTestingAll) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(13.dp),
-                                strokeWidth = 1.5.dp,
-                                color = Color(0xFF818CF8)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Testing...",
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.SansSerif,
-                                color = Color(0xFF818CF8)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Filled.Speed,
-                                contentDescription = "Test all",
-                                tint = Color(0xFF94A3B8),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = "Test all",
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.SansSerif,
-                                color = Color(0xFF94A3B8)
-                            )
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF0C101E))
+                        .border(1.dp, Color(0xFF1E2842), RoundedCornerShape(8.dp))
+                        .clickable(enabled = !isTestingAll) {
+                            viewModel.testAllNodes()
                         }
-                    }
-
-                    // (+) Purple/Indigo Add Button (38dp x 38dp)
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF5856D6))
-                            .clickable { showImportDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isTestingAll) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(13.dp),
+                            strokeWidth = 1.5.dp,
+                            color = Color(0xFF818CF8)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Testing...",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.SansSerif,
+                            color = Color(0xFF818CF8)
+                        )
+                    } else {
                         Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = "Add Config",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = Icons.Filled.Speed,
+                            contentDescription = "Test all",
+                            tint = Color(0xFFA5B4FC),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Test all",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.SansSerif,
+                            color = Color(0xFFA5B4FC)
                         )
                     }
                 }
@@ -238,13 +208,12 @@ fun ServerSelectionScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 3. Node List Section
+            // 3. Node List Section: Assigned Configurations
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Subscription Group (e.g. Nebula Cloud / V2RayOps)
-                if (subscriptionConfigs.isNotEmpty()) {
+                if (filteredConfigs.isNotEmpty()) {
                     item {
                         Column {
                             Row(
@@ -253,20 +222,21 @@ fun ServerSelectionScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Nebula Cloud",
+                                    text = "Assigned Configurations",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Updated 2h ago",
+                                    text = "Live Network",
                                     fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
                                     color = Color(0xFF64748B)
                                 )
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "SUBSCRIPTION • ${subscriptionConfigs.size} NODES",
+                                text = "V2RAYOPS NETWORK • ${filteredConfigs.size} PROFILES",
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 color = Color(0xFF64748B)
@@ -274,70 +244,37 @@ fun ServerSelectionScreen(
                         }
                     }
 
-                    items(subscriptionConfigs, key = { it.id }) { config ->
+                    items(filteredConfigs, key = { it.id }) { config ->
                         val isSelected = config.id == selectedConfig?.id
-                        val ping = pingMap[config.id] ?: defaultPing(config.id)
+                        val realPing = pingMap[config.id]
                         NodeCardItem(
                             config = config,
                             isSelected = isSelected,
-                            pingMs = ping,
+                            pingMs = realPing,
                             onClick = {
                                 viewModel.selectConfig(config)
                                 onBackClick()
                             }
                         )
                     }
-                }
-
-                // Manual Group
-                if (manualConfigs.isNotEmpty() || subscriptionConfigs.isEmpty()) {
+                } else {
                     item {
-                        Column {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = "Manual",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "ADDED BY YOU • ${manualConfigs.size} NODES",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
+                                text = "No active configurations found",
+                                fontSize = 13.sp,
                                 color = Color(0xFF64748B)
                             )
                         }
-                    }
-
-                    items(manualConfigs, key = { it.id }) { config ->
-                        val isSelected = config.id == selectedConfig?.id
-                        val ping = pingMap[config.id] ?: defaultPing(config.id)
-                        NodeCardItem(
-                            config = config,
-                            isSelected = isSelected,
-                            pingMs = ping,
-                            onClick = {
-                                viewModel.selectConfig(config)
-                                onBackClick()
-                            }
-                        )
                     }
                 }
             }
         }
-    }
-
-    if (showImportDialog) {
-        ImportConfigDialog(
-            onDismiss = { showImportDialog = false },
-            onImport = { rawUri ->
-                val error = viewModel.importConfig(rawUri)
-                if (error == null) {
-                    showImportDialog = false
-                }
-                error
-            }
-        )
     }
 }
 
@@ -345,13 +282,14 @@ fun ServerSelectionScreen(
 private fun NodeCardItem(
     config: VpnConfig,
     isSelected: Boolean,
-    pingMs: Long,
+    pingMs: Long?,
     onClick: () -> Unit
 ) {
     val meta = remember(config) { deriveConfigPackageDetails(config) }
     val subtitle = "${meta.isp} • ${meta.limit}"
 
     val (pingText, pingColor) = when {
+        pingMs == null -> "-- ms" to Color(0xFF64748B)
         pingMs <= 0L -> "timeout" to Color(0xFFF43F5E)
         pingMs < 100L -> "$pingMs ms" to Color(0xFF22C55E)
         pingMs < 200L -> "$pingMs ms" to Color(0xFFF59E0B)
@@ -419,7 +357,7 @@ private fun NodeCardItem(
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Latency Text
+            // Real measured Latency Text
             Text(
                 text = pingText,
                 fontSize = 11.sp,
@@ -455,15 +393,5 @@ private fun NodeCardItem(
                 )
             }
         }
-    }
-}
-
-private fun defaultPing(id: Long): Long {
-    return when (id % 5) {
-        0L -> 48L
-        1L -> 72L
-        2L -> 164L
-        3L -> 211L
-        else -> 48L
     }
 }

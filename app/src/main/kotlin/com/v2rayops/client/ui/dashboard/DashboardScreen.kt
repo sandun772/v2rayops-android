@@ -61,6 +61,7 @@ fun DashboardScreen(
     val trafficStats by viewModel.trafficStats.collectAsState()
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
+    val livePingMs by viewModel.livePingMs.collectAsState()
 
     var speedMode by remember { mutableStateOf(SpeedOptimizationMode.BALANCED) }
     var showUsageCockpit by remember { mutableStateOf(false) }
@@ -99,7 +100,7 @@ fun DashboardScreen(
     }
 
     val isConnected = connectionState.isConnected
-    val pingMs = if (isConnected) (diagnosticResult?.pingMs?.coerceAtLeast(0L) ?: 48L) else 48L
+    val realPingMs = livePingMs ?: diagnosticResult?.pingMs?.takeIf { it > 0 }
 
     Scaffold(
         topBar = {
@@ -161,7 +162,7 @@ fun DashboardScreen(
                 // 5. Active Node Summary Card (Real brand icons & ISP / Limit display)
                 ActiveNodeSummaryCard(
                     config = selectedConfig,
-                    pingMs = pingMs,
+                    pingMs = realPingMs,
                     onClick = onNavigateToServers
                 )
 
@@ -221,7 +222,7 @@ fun DashboardScreen(
                 connectionState = connectionState,
                 trafficStats = trafficStats,
                 selectedConfig = selectedConfig,
-                pingMs = pingMs,
+                pingMs = realPingMs,
                 onDismiss = { showUsageCockpit = false }
             )
         }

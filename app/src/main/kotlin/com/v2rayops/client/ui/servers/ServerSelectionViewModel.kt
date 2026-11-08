@@ -9,6 +9,9 @@ import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.network.ConnectionDiagnosticsManager
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -44,36 +47,40 @@ class ServerSelectionViewModel @Inject constructor(
 
     init {
         refreshConfigs()
+        observeConfigsForTesting()
     }
 
-    fun testAllNodes() {
+    private fun observeConfigsForTesting() {
         viewModelScope.launch {
+            configs.collect { list ->
+                if (list.isNotEmpty() && _pingMap.value.isEmpty()) {
+                    testAllNodes()
+                }
+            }
+        }
+    }
+
+    /**
+     * Executes real, parallel TCP connect latency measurements across all assigned server profiles.
+     */
+    fun testAllNodes() {
+        if (_isTestingAll.value) return
+        viewModelScope.launch(Dispatchers.IO) {
             _isTestingAll.value = true
             val currentConfigs = configs.value
-            val newMap = _pingMap.value.toMutableMap()
-            for (cfg in currentConfigs) {
-                val ping = diagnosticsManager.measureEdgePing(cfg)
-                newMap[cfg.id] = ping
-                _pingMap.value = newMap.toMap()
-            }
+            val results = currentConfigs.map { cfg ->
+                async {
+                    val ping = diagnosticsManager.measureEdgePing(cfg)
+                    cfg.id to ping
+                }
+            }.awaitAll()
+            _pingMap.value = results.toMap()
             _isTestingAll.value = false
         }
     }
 
     fun selectConfig(config: VpnConfig) {
         subscriptionRepository.selectConfig(config)
-    }
-
-    fun importConfig(rawUri: String): String? {
-        return when (val res = subscriptionRepository.importManualConfig(rawUri)) {
-            is com.v2rayops.client.core.result.AppResult.Success -> null
-            is com.v2rayops.client.core.result.AppResult.Failure -> res.error.message
-            else -> null
-        }
-    }
-
-    fun deleteConfig(configId: Long) {
-        subscriptionRepository.deleteConfig(configId)
     }
 
     fun refreshConfigs() {
