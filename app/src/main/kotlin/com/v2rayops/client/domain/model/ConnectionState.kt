@@ -27,3 +27,23 @@ data class TrafficStats(
 ) {
     val totalBytes: Long get() = totalUploadBytes + totalDownloadBytes
 }
+
+enum class SmartHuntStage {
+    IDLE,
+    CHECKING_VPN,
+    TURNING_ON_AIRPLANE,
+    AIRPLANE_ON_HOLD,
+    TURNING_OFF_AIRPLANE,
+    STABILIZING_NETWORK,
+    CONNECTING_VPN,
+    SUCCESS
+}
+
+data class SmartHuntProgress(
+    val stage: SmartHuntStage = SmartHuntStage.IDLE,
+    val countdownSeconds: Int = 0,
+    val currentCycle: Int = 0,
+    val assignedIp: String? = null
+) {
+    val isActive: Boolean get() = stage != SmartHuntStage.IDLE && stage != SmartHuntStage.SUCCESS
+}

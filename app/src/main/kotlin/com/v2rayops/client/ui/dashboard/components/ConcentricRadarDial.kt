@@ -43,6 +43,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2rayops.client.domain.model.ConnectionState
+import com.v2rayops.client.domain.model.SmartHuntProgress
+import com.v2rayops.client.domain.model.SmartHuntStage
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -60,12 +62,20 @@ fun ConcentricRadarDial(
     connectionState: ConnectionState,
     isSmartHunting: Boolean = false,
     isCyclingAirplane: Boolean = false,
+    smartHuntProgress: SmartHuntProgress = SmartHuntProgress(),
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val isConnected = connectionState.isConnected && !isSmartHunting && !isCyclingAirplane
-    val isConnecting = isCyclingAirplane || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+    val isAirplanePhase = isCyclingAirplane ||
+            smartHuntProgress.stage == SmartHuntStage.TURNING_ON_AIRPLANE ||
+            smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON_HOLD ||
+            smartHuntProgress.stage == SmartHuntStage.TURNING_OFF_AIRPLANE
+
+    val isStabilizingPhase = smartHuntProgress.stage == SmartHuntStage.STABILIZING_NETWORK
+
+    val isConnected = connectionState.isConnected && !smartHuntProgress.isActive && !isSmartHunting
+    val isConnecting = smartHuntProgress.isActive || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
     // Colors matching reference mockups
     val connectedBorder = Color(0xFF6366F1)     // Electric Indigo
@@ -76,8 +86,11 @@ fun ConcentricRadarDial(
     val connectingIcon = Color(0xFFF59E0B)
     val connectingDot = Color(0xFFF59E0B)
 
-    val cyclingBorder = Color(0xFFFB7185)       // Radiant Coral Rose
-    val cyclingIcon = Color(0xFFFB7185)
+    val airplaneBorder = Color(0xFFFB7185)      // Radiant Coral Rose
+    val airplaneIcon = Color(0xFFFB7185)
+
+    val stabilizingBorder = Color(0xFF06B6D4)   // Cyber Cyan
+    val stabilizingIcon = Color(0xFF06B6D4)
 
     val disconnectedBorder = Color(0xFF232E44)  // Steel Slate Navy
     val disconnectedIcon = Color(0xFF6B7A99)    // Muted Steel Slate
@@ -85,7 +98,8 @@ fun ConcentricRadarDial(
 
     // Smoothly animated transition between states
     val targetBorder = when {
-        isCyclingAirplane -> cyclingBorder
+        isAirplanePhase -> airplaneBorder
+        isStabilizingPhase -> stabilizingBorder
         isConnected -> connectedBorder
         isConnecting -> connectingBorder
         else -> disconnectedBorder
@@ -97,7 +111,8 @@ fun ConcentricRadarDial(
     )
 
     val targetIcon = when {
-        isCyclingAirplane -> cyclingIcon
+        isAirplanePhase -> airplaneIcon
+        isStabilizingPhase -> stabilizingIcon
         isConnected -> connectedIcon
         isConnecting -> connectingIcon
         else -> disconnectedIcon
@@ -139,7 +154,7 @@ fun ConcentricRadarDial(
     // Transitions for radar animations
     val infiniteTransition = rememberInfiniteTransition(label = "RadarMotion")
 
-    // Dual-peak ECG Heartbeat Wave (lub-dub rhythm) active when cycling/turning on Airplane Mode
+    // 1. Dual-peak ECG Heartbeat Wave (lub-dub rhythm) active during Airplane Mode Phase
     val heartbeatProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
@@ -156,6 +171,17 @@ fun ConcentricRadarDial(
             repeatMode = RepeatMode.Restart
         ),
         label = "HeartbeatPulse"
+    )
+
+    // 2. Cellular Carrier Signal Sonar Wave active during 5s Network Stabilization Phase
+    val sonarProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "SonarProgress"
     )
 
     val breathMultiplier by infiniteTransition.animateFloat(
@@ -214,6 +240,8 @@ fun ConcentricRadarDial(
 
                     // --- 1. Draw 2 Dashed Orbital Track Circles in Clean Dark Space ---
                     val orbitColor = when {
+                        isAirplanePhase -> Color(0xFF4C1D28).copy(alpha = 0.60f)
+                        isStabilizingPhase -> Color(0xFF0C4648).copy(alpha = 0.60f)
                         isConnected -> Color(0xFF2B3356).copy(alpha = 0.55f)
                         isConnecting -> Color(0xFF3E3722).copy(alpha = 0.55f)
                         else -> Color(0xFF172033).copy(alpha = 0.40f)
@@ -265,24 +293,35 @@ fun ConcentricRadarDial(
                         // Staggered cascade wave for state transition
                         val ringCascade = ((stateProgress - (i * 0.09f)) / 0.50f).coerceIn(0f, 1f)
 
-                        // Outward cascading heartbeat pulse across concentric rings
-                        val ringHeartbeat = if (isCyclingAirplane) {
+                        // 1. Outward cascading heartbeat pulse across concentric rings (Airplane ON / Hold)
+                        val ringHeartbeat = if (isAirplanePhase) {
                             val delayFraction = i * 0.07f
                             ((heartbeatProgress - delayFraction) / (1f - delayFraction)).coerceIn(0f, 1f)
                         } else 0f
 
-                        // Dynamic dot radius: expands with heartbeat pulse
-                        val currentDotRadius = if (isCyclingAirplane) {
-                            dotRadiusPx * (1f + ringHeartbeat * 0.85f)
-                        } else {
-                            dotRadiusPx
+                        // 2. Outward cascading cellular signal wave (Network Stabilizing 5s)
+                        val ringSonar = if (isStabilizingPhase) {
+                            val waveFraction = ((sonarProgress - (i * 0.16f)).mod(1f))
+                            (1f - waveFraction).coerceIn(0f, 1f)
+                        } else 0f
+
+                        // Dynamic dot radius: expands with heartbeat or sonar pulse
+                        val currentDotRadius = when {
+                            isAirplanePhase -> dotRadiusPx * (1f + ringHeartbeat * 0.90f)
+                            isStabilizingPhase -> dotRadiusPx * (1f + ringSonar * 0.65f)
+                            else -> dotRadiusPx
                         }
 
                         val dotAlpha = when {
-                            isCyclingAirplane -> {
+                            isAirplanePhase -> {
                                 val base = 0.35f * baseFalloff
                                 val surge = ringHeartbeat * 0.65f
                                 (base + surge).coerceIn(0.16f, 0.98f)
+                            }
+                            isStabilizingPhase -> {
+                                val base = 0.32f * baseFalloff
+                                val surge = ringSonar * 0.68f
+                                (base + surge).coerceIn(0.18f, 0.98f)
                             }
                             isConnected -> {
                                 val activeAlpha = 0.75f * baseFalloff * breathMultiplier
@@ -299,15 +338,26 @@ fun ConcentricRadarDial(
                             }
                         }
 
-                        // Radiant dot gradient: Inner rings Coral Rose (#FB7185) -> Outer rings Cyber Amber (#F59E0B)
-                        val ringDotColor = if (isCyclingAirplane) {
-                            val t = normalizedRing
-                            val r = (0xFB * (1 - t) + 0xF5 * t) / 255f
-                            val g = (0x71 * (1 - t) + 0x9E * t) / 255f
-                            val b = (0x85 * (1 - t) + 0x0B * t) / 255f
-                            Color(r, g, b, 1f)
-                        } else {
-                            animatedDotColor
+                        // Radiant dot gradients per event:
+                        // 1. Airplane Phase: Coral Rose (#FB7185) -> Cyber Amber (#F59E0B)
+                        // 2. Stabilizing Phase: Cyber Cyan (#06B6D4) -> Emerald Mint (#10B981)
+                        // 3. Normal / Connecting: animatedDotColor
+                        val ringDotColor = when {
+                            isAirplanePhase -> {
+                                val t = normalizedRing
+                                val r = (0xFB * (1 - t) + 0xF5 * t) / 255f
+                                val g = (0x71 * (1 - t) + 0x9E * t) / 255f
+                                val b = (0x85 * (1 - t) + 0x0B * t) / 255f
+                                Color(r, g, b, 1f)
+                            }
+                            isStabilizingPhase -> {
+                                val t = normalizedRing
+                                val r = (0x06 * (1 - t) + 0x10 * t) / 255f
+                                val g = (0xB6 * (1 - t) + 0xB9 * t) / 255f
+                                val b = (0xD4 * (1 - t) + 0x81 * t) / 255f
+                                Color(r, g, b, 1f)
+                            }
+                            else -> animatedDotColor
                         }
 
                         for (j in 0 until count) {

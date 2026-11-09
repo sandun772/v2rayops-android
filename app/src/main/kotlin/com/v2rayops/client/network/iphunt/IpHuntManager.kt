@@ -240,6 +240,68 @@ class IpHuntManager @Inject constructor(
         true
     }
 
+    suspend fun ensureAirplaneModeOn(): Boolean = withContext(dispatchers.io) {
+        if (isAirplaneModeOn()) return@withContext true
+
+        // Tier 1: Root
+        if (_state.value.isRootGranted) {
+            val rootOk = setAirplaneModeViaRoot(true)
+            if (rootOk && isAirplaneModeOn()) return@withContext true
+        }
+
+        // Tier 2: Accessibility Service
+        var service = IpHuntAccessibilityService.instance
+        if (service == null && IpHuntAccessibilityService.isAccessibilityEnabled(context)) {
+            for (i in 0 until 15) {
+                delay(100)
+                service = IpHuntAccessibilityService.instance
+                if (service != null) break
+            }
+        }
+
+        if (service != null) {
+            return@withContext service.setAirplaneMode(true)
+        }
+
+        false
+    }
+
+    suspend fun ensureAirplaneModeOff(): Boolean = withContext(dispatchers.io) {
+        if (!isAirplaneModeOn()) return@withContext true
+
+        // Tier 1: Root
+        if (_state.value.isRootGranted) {
+            val rootOk = setAirplaneModeViaRoot(false)
+            if (rootOk && !isAirplaneModeOn()) return@withContext true
+        }
+
+        // Tier 2: Accessibility Service
+        var service = IpHuntAccessibilityService.instance
+        if (service == null && IpHuntAccessibilityService.isAccessibilityEnabled(context)) {
+            for (i in 0 until 15) {
+                delay(100)
+                service = IpHuntAccessibilityService.instance
+                if (service != null) break
+            }
+        }
+
+        if (service != null) {
+            return@withContext service.setAirplaneMode(false)
+        }
+
+        false
+    }
+
+    private suspend fun setAirplaneModeViaRoot(enable: Boolean): Boolean = withContext(dispatchers.io) {
+        try {
+            val cmd = if (enable) "cmd connectivity airplane-mode enable" else "cmd connectivity airplane-mode disable"
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            p.waitFor() == 0
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     suspend fun executeSingleAutoCycle(): Boolean {
         refreshAutomationCapabilities()
         return executeAutoAirplaneToggle()

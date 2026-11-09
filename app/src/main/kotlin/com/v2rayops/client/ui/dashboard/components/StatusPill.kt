@@ -21,23 +21,50 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2rayops.client.domain.model.ConnectionState
+import com.v2rayops.client.domain.model.SmartHuntProgress
+import com.v2rayops.client.domain.model.SmartHuntStage
 
 @Composable
 fun StatusPill(
     connectionState: ConnectionState,
     isSmartHunting: Boolean = false,
     isCyclingAirplane: Boolean = false,
+    smartHuntProgress: SmartHuntProgress = SmartHuntProgress(),
     modifier: Modifier = Modifier
 ) {
-    val isConnected = connectionState.isConnected && !isSmartHunting && !isCyclingAirplane
-    val isConnecting = isCyclingAirplane || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+    val isConnected = connectionState.isConnected && !smartHuntProgress.isActive && !isSmartHunting
+    val isConnecting = smartHuntProgress.isActive || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
     val (bg, border, textColor, text) = when {
-        isCyclingAirplane -> Quadruple(
+        smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON_HOLD -> Quadruple(
             Color(0xFF240A12),
             Color(0xFF5E1B2C),
             Color(0xFFFB7185),
-            "CYCLING AIRPLANE"
+            "AIRPLANE ON • ${smartHuntProgress.countdownSeconds}s"
+        )
+        smartHuntProgress.stage == SmartHuntStage.TURNING_ON_AIRPLANE || (isCyclingAirplane && !smartHuntProgress.isActive) -> Quadruple(
+            Color(0xFF240A12),
+            Color(0xFF5E1B2C),
+            Color(0xFFFB7185),
+            "ENABLING AIRPLANE"
+        )
+        smartHuntProgress.stage == SmartHuntStage.TURNING_OFF_AIRPLANE -> Quadruple(
+            Color(0xFF1E1405),
+            Color(0xFF4A320A),
+            Color(0xFFF59E0B),
+            "DISABLING AIRPLANE"
+        )
+        smartHuntProgress.stage == SmartHuntStage.STABILIZING_NETWORK -> Quadruple(
+            Color(0xFF041B1C),
+            Color(0xFF0B4648),
+            Color(0xFF06B6D4),
+            "STABILIZING • ${smartHuntProgress.countdownSeconds}s"
+        )
+        smartHuntProgress.stage == SmartHuntStage.CHECKING_VPN || smartHuntProgress.stage == SmartHuntStage.CONNECTING_VPN -> Quadruple(
+            Color(0xFF1E1405),
+            Color(0xFF4A320A),
+            Color(0xFFF59E0B),
+            "HUNTING IP"
         )
         isSmartHunting -> Quadruple(
             Color(0xFF1E1405),

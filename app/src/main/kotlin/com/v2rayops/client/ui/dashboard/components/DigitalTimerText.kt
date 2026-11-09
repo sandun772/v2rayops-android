@@ -20,12 +20,15 @@ import java.util.Locale
 @Composable
 fun DigitalTimerText(
     connectionState: ConnectionState,
+    countdownSeconds: Int = 0,
     modifier: Modifier = Modifier
 ) {
     var timerDisplay by remember { mutableStateOf("00:00:00") }
 
-    LaunchedEffect(connectionState) {
-        if (connectionState is ConnectionState.Connected) {
+    LaunchedEffect(connectionState, countdownSeconds) {
+        if (countdownSeconds > 0) {
+            timerDisplay = String.format(Locale.US, "00:00:%02d", countdownSeconds)
+        } else if (connectionState is ConnectionState.Connected) {
             val startMs = connectionState.connectedSinceMs
             while (isActive) {
                 val elapsedSec = ((System.currentTimeMillis() - startMs).coerceAtLeast(0L)) / 1000L

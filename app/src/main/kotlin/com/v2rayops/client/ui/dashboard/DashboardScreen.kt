@@ -95,6 +95,7 @@ fun DashboardScreen(
     val ipHuntState by viewModel.ipHuntState.collectAsState()
     val isSmartHunting by viewModel.isSmartHunting.collectAsState()
     val isCyclingAirplane by viewModel.isCyclingAirplaneMode.collectAsState()
+    val smartHuntProgress by viewModel.smartHuntProgress.collectAsState()
     var pendingSmartHuntAction by remember { mutableStateOf(false) }
 
     var pullDistance by remember { mutableFloatStateOf(0f) }
@@ -333,17 +334,22 @@ fun DashboardScreen(
                 StatusPill(
                     connectionState = connectionState,
                     isSmartHunting = isSmartHunting,
-                    isCyclingAirplane = isCyclingAirplane
+                    isCyclingAirplane = isCyclingAirplane,
+                    smartHuntProgress = smartHuntProgress
                 )
 
                 // 2. Big Digital Clock (00:00:00 or 01:24:37)
-                DigitalTimerText(connectionState = connectionState)
+                DigitalTimerText(
+                    connectionState = connectionState,
+                    countdownSeconds = smartHuntProgress.countdownSeconds
+                )
 
                 // 3. Center Concentric Dot Radar Dial (Single tap: normal connect, Hold: IP Hunter)
                 ConcentricRadarDial(
                     connectionState = connectionState,
                     isSmartHunting = isSmartHunting,
                     isCyclingAirplane = isCyclingAirplane,
+                    smartHuntProgress = smartHuntProgress,
                     onClick = handleConnectClick,
                     onLongClick = handleStartSmartHunt
                 )
