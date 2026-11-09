@@ -69,8 +69,13 @@ fun ProxyModeSelector(
         ) {
             SpeedOptimizationMode.entries.forEach { mode ->
                 val isSelected = mode == selectedMode
+                val modeColor = when (mode) {
+                    SpeedOptimizationMode.SPEED -> Color(0xFF6366F1)
+                    SpeedOptimizationMode.STABILITY -> Color(0xFF10B981)
+                    SpeedOptimizationMode.BALANCED -> Color(0xFF8B5CF6)
+                }
                 val bg by animateColorAsState(
-                    targetValue = if (isSelected) Color(0xFF6366F1) else Color.Transparent,
+                    targetValue = if (isSelected) modeColor else Color.Transparent,
                     label = "ModeBg"
                 )
                 val textColor by animateColorAsState(

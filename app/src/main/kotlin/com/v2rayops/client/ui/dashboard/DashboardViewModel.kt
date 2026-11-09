@@ -12,6 +12,7 @@ import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.network.ConnectionDiagnosticResult
 import com.v2rayops.client.network.ConnectionDiagnosticsManager
 import com.v2rayops.client.network.DiagnosticStatus
+import com.v2rayops.client.ui.dashboard.components.SpeedOptimizationMode
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -179,6 +180,46 @@ class DashboardViewModel @Inject constructor(
                 if (config != null) {
                     vpnManager.connect(config)
                 }
+            }
+        }
+    }
+
+    /**
+     * Activates the selected Speed & Optimization mode (Balanced, Speed, or Stability)
+     * by switching to the matching pre-tuned preset or dynamically adapting kernel/socket parameters.
+     * Reconnects the active tunnel seamlessly if currently connected.
+     */
+    fun setSpeedOptimizationMode(mode: SpeedOptimizationMode) {
+        viewModelScope.launch {
+            val allConfigs = configs.value
+            val currentSelected = selectedConfig.value ?: allConfigs.firstOrNull() ?: return@launch
+            val modeName = mode.name // "SPEED", "BALANCED", "STABILITY"
+
+            // 1. Check if a pre-tuned preset already exists for this mode
+            val matchingPreset = allConfigs.find { it.tuningMode.equals(modeName, ignoreCase = true) }
+            val targetConfig = if (matchingPreset != null) {
+                matchingPreset
+            } else {
+                // Adaptively apply this mode's kernel parameters to current configuration
+                val (mtu, tcpBuffer, smartQoS) = when (mode) {
+                    SpeedOptimizationMode.SPEED -> Triple(1400, 1024, true)
+                    SpeedOptimizationMode.STABILITY -> Triple(1360, 256, true)
+                    SpeedOptimizationMode.BALANCED -> Triple(1380, 512, true)
+                }
+                currentSelected.copy(
+                    tuningMode = modeName,
+                    customMtu = mtu,
+                    customTcpBufferKb = tcpBuffer,
+                    dpiDelayFix = false,
+                    smartQoS = smartQoS
+                )
+            }
+
+            subscriptionRepository.selectConfig(targetConfig)
+
+            // If tunnel is active, seamlessly reconnect with the selected mode's parameters & route
+            if (connectionState.value.isConnected) {
+                vpnManager.connect(targetConfig)
             }
         }
     }

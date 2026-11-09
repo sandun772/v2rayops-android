@@ -63,7 +63,13 @@ fun DashboardScreen(
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
     val livePingMs by viewModel.livePingMs.collectAsState()
 
-    var speedMode by remember { mutableStateOf(SpeedOptimizationMode.BALANCED) }
+    val currentMode = remember(selectedConfig) {
+        when (selectedConfig?.tuningMode?.uppercase()) {
+            "SPEED" -> SpeedOptimizationMode.SPEED
+            "STABILITY" -> SpeedOptimizationMode.STABILITY
+            else -> SpeedOptimizationMode.BALANCED
+        }
+    }
     var showUsageCockpit by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
@@ -168,8 +174,10 @@ fun DashboardScreen(
 
                 // 6. SPEED & OPTIMIZATION MODE Segmented Control (Balanced / Speed / Stability)
                 ProxyModeSelector(
-                    selectedMode = speedMode,
-                    onModeSelected = { speedMode = it }
+                    selectedMode = currentMode,
+                    onModeSelected = { mode ->
+                        viewModel.setSpeedOptimizationMode(mode)
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
