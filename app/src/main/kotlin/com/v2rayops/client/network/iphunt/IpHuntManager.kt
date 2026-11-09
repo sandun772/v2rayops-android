@@ -2,11 +2,13 @@ package com.v2rayops.client.network.iphunt
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.provider.Settings
 import com.v2rayops.client.core.dispatchers.AppDispatchers
 import com.v2rayops.client.core.logger.AppLogger
@@ -20,12 +22,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resume
 
 data class IpHuntState(
     val isHunting: Boolean = false,
@@ -34,9 +38,14 @@ data class IpHuntState(
     val isMatched: Boolean = false,
     val attempts: Int = 0,
     val isRootGranted: Boolean = false,
+    val isAccessibilityActive: Boolean = false,
+    val isSecureSettingsGranted: Boolean = false,
     val isCyclingNow: Boolean = false,
     val statusMessage: String = "Ready to hunt"
-)
+) {
+    val isFullyAutomated: Boolean
+        get() = isRootGranted || isAccessibilityActive || isSecureSettingsGranted
+}
 
 @Singleton
 class IpHuntManager @Inject constructor(
@@ -63,17 +72,30 @@ class IpHuntManager @Inject constructor(
             currentIp = initialIp,
             isMatched = isIpMatching(initialIp, _state.value.selectedTargetPrefix)
         )
-        // Check root on startup
-        scope.launch {
-            val rootOk = checkRootPermission()
-            _state.value = _state.value.copy(isRootGranted = rootOk)
-        }
+        refreshAutomationCapabilities()
     }
 
     /**
-     * Checks whether Root (su) permission is available and granted.
-     * Executes 'su -c id' which prompts Magisk/KernelSU if permission is requested for the first time.
+     * Inspects device for all available automation mechanisms:
+     * 1. Superuser / Root (su)
+     * 2. Accessibility Service (IpHuntAccessibilityService)
+     * 3. WRITE_SECURE_SETTINGS permission (via ADB / Shizuku)
      */
+    fun refreshAutomationCapabilities() {
+        scope.launch {
+            val rootOk = checkRootPermission()
+            val accessibilityOk = IpHuntAccessibilityService.isRunning() ||
+                    IpHuntAccessibilityService.isAccessibilityEnabled(context)
+            val secureSettingsOk = checkSecureSettingsPermission()
+
+            _state.value = _state.value.copy(
+                isRootGranted = rootOk,
+                isAccessibilityActive = accessibilityOk,
+                isSecureSettingsGranted = secureSettingsOk
+            )
+        }
+    }
+
     suspend fun checkRootPermission(): Boolean = withContext(dispatchers.io) {
         try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
@@ -81,6 +103,14 @@ class IpHuntManager @Inject constructor(
             val output = reader.readLine().orEmpty()
             val code = process.waitFor()
             code == 0 && output.contains("uid=0")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun checkSecureSettingsPermission(): Boolean {
+        return try {
+            context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == PackageManager.PERMISSION_GRANTED
         } catch (_: Exception) {
             false
         }
@@ -156,13 +186,42 @@ class IpHuntManager @Inject constructor(
     }
 
     /**
-     * Executes automatic airplane mode toggle cycle via root commands:
-     * 1. Turns Airplane Mode ON (or disables data radio)
-     * 2. Waits 1.5s for tower detachment
-     * 3. Turns Airplane Mode OFF (or re-enables data radio)
+     * Executes automatic airplane mode toggle cycle using the highest available privilege tier:
+     * - Tier 1: Root command (su) -> background silent
+     * - Tier 2: WRITE_SECURE_SETTINGS -> system settings write & broadcast
+     * - Tier 3: Accessibility Service -> automated UI toggle without root
      */
-    private suspend fun executeAutoAirplaneToggle(): Boolean = withContext(dispatchers.io) {
-        // Method 1: cmd connectivity airplane-mode (Modern standard Android 7-15)
+    private suspend fun executeAutoAirplaneToggle(): Boolean {
+        // Tier 1: Root
+        if (_state.value.isRootGranted) {
+            val rootSuccess = executeRootToggle()
+            if (rootSuccess) return true
+        }
+
+        // Tier 2: WRITE_SECURE_SETTINGS
+        if (_state.value.isSecureSettingsGranted) {
+            val secureSuccess = executeSecureSettingsToggle()
+            if (secureSuccess) return true
+        }
+
+        // Tier 3: Accessibility Service (For unrooted devices)
+        val accessibilityService = IpHuntAccessibilityService.instance
+        if (accessibilityService != null) {
+            AppLogger.d("IpHuntManager", "Triggering Accessibility Service automated toggle...")
+            return suspendCancellableCoroutine { cont ->
+                accessibilityService.performAutoToggleCycle { success ->
+                    if (cont.isActive) {
+                        cont.resume(success)
+                    }
+                }
+            }
+        }
+
+        return false
+    }
+
+    private suspend fun executeRootToggle(): Boolean = withContext(dispatchers.io) {
+        // Method 1: cmd connectivity airplane-mode
         try {
             val p1 = Runtime.getRuntime().exec(arrayOf("su", "-c", "cmd connectivity airplane-mode enable"))
             if (p1.waitFor() == 0) {
@@ -172,7 +231,7 @@ class IpHuntManager @Inject constructor(
             }
         } catch (_: Exception) {}
 
-        // Method 2: svc data toggle (Immediate cellular radio disconnect/re-negotiate)
+        // Method 2: svc data toggle
         try {
             val p3 = Runtime.getRuntime().exec(arrayOf("su", "-c", "svc data disable"))
             if (p3.waitFor() == 0) {
@@ -182,28 +241,34 @@ class IpHuntManager @Inject constructor(
             }
         } catch (_: Exception) {}
 
-        // Method 3: settings global toggle with broadcast
-        try {
-            val p5 = Runtime.getRuntime().exec(arrayOf(
-                "su", "-c",
-                "settings put global airplane_mode_on 1 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true"
-            ))
-            if (p5.waitFor() == 0) {
-                delay(1500)
-                val p6 = Runtime.getRuntime().exec(arrayOf(
-                    "su", "-c",
-                    "settings put global airplane_mode_on 0 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false"
-                ))
-                if (p6.waitFor() == 0) return@withContext true
-            }
-        } catch (_: Exception) {}
-
         false
     }
 
+    private suspend fun executeSecureSettingsToggle(): Boolean = withContext(dispatchers.io) {
+        try {
+            Settings.Global.putInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 1)
+            val onIntent = Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED).apply {
+                putExtra("state", true)
+            }
+            context.sendBroadcast(onIntent)
+
+            delay(1500)
+
+            Settings.Global.putInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0)
+            val offIntent = Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED).apply {
+                putExtra("state", false)
+            }
+            context.sendBroadcast(offIntent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /**
-     * Starts the FULLY AUTOMATIC IP Hunting loop.
-     * Continuously cycles airplane mode in background until carrier assigns target IP prefix.
+     * Starts the IP Hunting loop.
+     * If automated (Root, Accessibility, or Secure Settings), continuously cycles until target IP matches.
+     * If unprivileged, monitors IP actively and provides one-tap permission setup.
      */
     fun startAutoHunt(
         targetPrefix: String = _state.value.selectedTargetPrefix,
@@ -227,24 +292,36 @@ class IpHuntManager @Inject constructor(
             return
         }
 
+        refreshAutomationCapabilities()
+
         _state.value = _state.value.copy(
             isHunting = true,
             selectedTargetPrefix = cleanPrefix,
             isMatched = false,
             attempts = 0,
-            statusMessage = "Initializing automated IP hunt for $cleanPrefix*..."
+            statusMessage = "Starting IP hunt for $cleanPrefix*..."
         )
 
         registerNetworkWatcher(cleanPrefix, onMatched)
 
         huntingJob = scope.launch {
-            // First verify or prompt root access
-            val hasRoot = checkRootPermission()
-            _state.value = _state.value.copy(isRootGranted = hasRoot)
-
             var cycleCount = 0
 
             while (isActive && _state.value.isHunting) {
+                // Check if automation mechanism is available
+                val isAutomated = _state.value.isFullyAutomated
+
+                if (!isAutomated) {
+                    _state.value = _state.value.copy(
+                        isCyclingNow = false,
+                        statusMessage = "Permission required to automate airplane mode cycling on this device."
+                    )
+                    // Wait for user to grant permission or toggle manually
+                    delay(2000)
+                    refreshAutomationCapabilities()
+                    continue
+                }
+
                 cycleCount++
                 _state.value = _state.value.copy(
                     attempts = cycleCount,
@@ -252,17 +329,18 @@ class IpHuntManager @Inject constructor(
                     statusMessage = "Cycle #$cycleCount: Auto-toggling Airplane Mode ON..."
                 )
 
-                // Execute the automated airplane mode cycle
+                // Execute automated toggle cycle
                 val success = executeAutoAirplaneToggle()
 
                 if (!success) {
-                    AppLogger.w("IpHuntManager", "Auto-toggle command failed (Root missing or not granted).")
+                    AppLogger.w("IpHuntManager", "Automated toggle failed or timed out.")
                     _state.value = _state.value.copy(
                         isCyclingNow = false,
-                        isHunting = false,
-                        statusMessage = "Root permission required for automatic airplane mode cycling."
+                        statusMessage = "Auto-toggle interrupted. Re-checking permissions..."
                     )
-                    break
+                    delay(1500)
+                    refreshAutomationCapabilities()
+                    continue
                 }
 
                 _state.value = _state.value.copy(
@@ -377,6 +455,43 @@ class IpHuntManager @Inject constructor(
         )
     }
 
+    /**
+     * Opens the direct App Info & Permissions page for V2RayOps in Android system settings.
+     */
+    fun openAppPermissionSettings(ctx: Context = context) {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", ctx.packageName, null)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            ctx.startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                ctx.startActivity(intent)
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Opens Android Accessibility Settings so user can enable V2RayOps Auto-Pilot with 1 tap.
+     */
+    fun openAccessibilitySettings(ctx: Context = context) {
+        try {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            ctx.startActivity(intent)
+        } catch (_: Exception) {
+            openAppPermissionSettings(ctx)
+        }
+    }
+
+    /**
+     * Opens system Airplane Mode settings for manual toggle.
+     */
     fun openAirplaneSettings(ctx: Context = context) {
         try {
             val intent = Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).apply {
@@ -390,10 +505,7 @@ class IpHuntManager @Inject constructor(
                 }
                 ctx.startActivity(intent)
             } catch (_: Exception) {
-                val intent = Intent(Settings.ACTION_SETTINGS).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                ctx.startActivity(intent)
+                openAppPermissionSettings(ctx)
             }
         }
     }

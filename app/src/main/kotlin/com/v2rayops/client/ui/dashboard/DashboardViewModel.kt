@@ -74,6 +74,18 @@ class DashboardViewModel @Inject constructor(
         ipHuntManager.openAirplaneSettings(context)
     }
 
+    fun openAppPermissionSettings(context: Context) {
+        ipHuntManager.openAppPermissionSettings(context)
+    }
+
+    fun openAccessibilitySettings(context: Context) {
+        ipHuntManager.openAccessibilitySettings(context)
+    }
+
+    fun refreshIpHuntCapabilities() {
+        ipHuntManager.refreshAutomationCapabilities()
+    }
+
     val selectedConfig: StateFlow<VpnConfig?> = subscriptionRepository.observeSelectedConfig()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 

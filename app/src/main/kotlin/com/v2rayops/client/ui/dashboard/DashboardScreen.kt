@@ -404,7 +404,10 @@ fun DashboardScreen(
                 },
                 onStopHunt = { viewModel.stopIpHunt() },
                 onSetTargetPrefix = { viewModel.setIpHuntTargetPrefix(it) },
+                onOpenAccessibilitySettings = { viewModel.openAccessibilitySettings(context) },
+                onOpenAppPermissionSettings = { viewModel.openAppPermissionSettings(context) },
                 onOpenAirplaneSettings = { viewModel.openAirplaneSettings(context) },
+                onRefreshCapabilities = { viewModel.refreshIpHuntCapabilities() },
                 onConnectNow = {
                     showIpHuntDialog = false
                     handleConnectClick()
