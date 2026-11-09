@@ -6,7 +6,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -55,7 +57,7 @@ import com.v2rayops.client.ui.dashboard.components.ConcentricRadarDial
 import com.v2rayops.client.ui.dashboard.components.DigitalTimerText
 import com.v2rayops.client.ui.dashboard.components.HiddenSpeedStabilityWidget
 import com.v2rayops.client.ui.dashboard.components.ProxyModeSelector
-import com.v2rayops.client.ui.dashboard.components.PullDownChargingArc
+import com.v2rayops.client.ui.dashboard.components.PullDownChargingPill
 import com.v2rayops.client.ui.dashboard.components.SpeedDividedSection
 import com.v2rayops.client.ui.dashboard.components.SpeedOptimizationMode
 import com.v2rayops.client.ui.dashboard.components.StatusPill
@@ -90,9 +92,16 @@ fun DashboardScreen(
     }
     var showUsageCockpit by remember { mutableStateOf(false) }
 
+    var pullDistance by remember { mutableFloatStateOf(0f) }
     var isCharging by remember { mutableStateOf(false) }
     var chargeProgress by remember { mutableFloatStateOf(0f) }
     var isHiddenWidgetVisible by remember { mutableStateOf(false) }
+
+    val animatedPullOffset by animateFloatAsState(
+        targetValue = pullDistance,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "pullSpring"
+    )
 
     val scrollState = rememberScrollState()
 
@@ -116,6 +125,7 @@ fun DashboardScreen(
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     isHiddenWidgetVisible = true
                     isCharging = false
+                    pullDistance = 0f
                     chargeProgress = 0f
                     viewModel.startQuickAudit()
                     break
@@ -188,28 +198,42 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .pointerInput(scrollState.value, isHiddenWidgetVisible) {
-                    if (scrollState.value > 0 || isHiddenWidgetVisible) return@pointerInput
+                .pointerInput(Unit) {
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        var isArmed = false
-                        val startY = down.position.y
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (scrollState.value > 0 || isHiddenWidgetVisible) return@awaitEachGesture
 
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val pointer = event.changes.find { it.id == down.id }
-                            if (pointer == null || !pointer.pressed) {
-                                isCharging = false
-                                break
+                        val startY = down.position.y
+                        var armed = false
+
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pointer = event.changes.find { it.id == down.id }
+                                if (pointer == null || !pointer.pressed) {
+                                    break
+                                }
+
+                                val deltaY = pointer.position.y - startY
+                                if (deltaY > 0 && scrollState.value == 0) {
+                                    val damped = (deltaY * 0.35f).coerceIn(0f, 55f)
+                                    pullDistance = damped
+                                    if (damped >= 22f && !armed) {
+                                        armed = true
+                                        isCharging = true
+                                    } else if (damped < 12f && armed) {
+                                        armed = false
+                                        isCharging = false
+                                    }
+                                } else if (deltaY < -5f) {
+                                    break
+                                }
                             }
-                            val deltaY = pointer.position.y - startY
-                            if (deltaY > 50f && !isArmed && scrollState.value == 0) {
-                                isArmed = true
-                                isCharging = true
-                            } else if (deltaY < 20f && isArmed) {
-                                isArmed = false
-                                isCharging = false
-                            }
+                        } finally {
+                            armed = false
+                            isCharging = false
+                            pullDistance = 0f
+                            chargeProgress = 0f
                         }
                     }
                 }
@@ -224,17 +248,17 @@ fun DashboardScreen(
             ) {
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Pull-Down 3s Charging Arc Indicator
-                PullDownChargingArc(
-                    chargeProgress = chargeProgress,
-                    isCharging = isCharging
+                // Pull-Down 3s Charging Pill (animates smoothly down with finger drag)
+                PullDownChargingPill(
+                    pullOffset = animatedPullOffset,
+                    chargeProgress = chargeProgress
                 )
 
-                // Hidden Cyber Speed & Stability Cockpit Widget
+                // 3-Card Speed & Stability HUD (DOWNLOAD | UPLOAD | STABILITY)
                 AnimatedVisibility(
                     visible = isHiddenWidgetVisible,
-                    enter = expandVertically(tween(350, easing = FastOutSlowInEasing)) + fadeIn(tween(250)),
-                    exit = shrinkVertically(tween(300, easing = FastOutSlowInEasing)) + fadeOut(tween(200))
+                    enter = expandVertically(tween(250, easing = FastOutSlowInEasing)) + fadeIn(tween(180)),
+                    exit = shrinkVertically(tween(200, easing = FastOutSlowInEasing)) + fadeOut(tween(150))
                 ) {
                     HiddenSpeedStabilityWidget(
                         state = quickAuditState,
