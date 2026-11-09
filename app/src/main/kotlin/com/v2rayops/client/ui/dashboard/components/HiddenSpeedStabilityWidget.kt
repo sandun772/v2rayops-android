@@ -1,8 +1,10 @@
 package com.v2rayops.client.ui.dashboard.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -115,17 +117,19 @@ fun PullDownChargingPill(
 /**
  * 3-Card Speed & Stability HUD:
  * Displays DOWNLOAD, UPLOAD, and STABILITY cards side-by-side.
- * Compact, low height (~58dp), Connect Button Electric Indigo (#6366F1) & White theme.
- * Skeleton shimmer loading applies smoothly across the card widgets at start while
- * both Download and Upload start at 0.0 with download increasing first and then upload.
+ * Features:
+ * - Ample vertical breathing room (64dp height) with zero text overlap.
+ * - Smooth numeric glide/interpolation animations for speed increasing/decreasing.
+ * - Card surface skeleton shimmer during audit.
+ * - Retest trigger wired to swipe-down 3s hold, with clean dismiss action.
  */
 @Composable
 fun HiddenSpeedStabilityWidget(
     state: QuickAuditState,
     onDismiss: () -> Unit,
-    onRetest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Ambient surface shimmer transition
     val infiniteTransition = rememberInfiniteTransition(label = "widgetShimmer")
     val shimmerTranslate by infiniteTransition.animateFloat(
         initialValue = -250f,
@@ -137,7 +141,28 @@ fun HiddenSpeedStabilityWidget(
         label = "shimmerTranslate"
     )
 
-    // Skeleton shimmer brush across the card surfaces during audit
+    // Smooth numerical glide animation for Download throughput (no sudden jumps)
+    val animatedDownloadMbps by animateFloatAsState(
+        targetValue = state.downloadMbps.toFloat(),
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "animatedDownload"
+    )
+
+    // Smooth numerical glide animation for Upload throughput
+    val animatedUploadMbps by animateFloatAsState(
+        targetValue = state.uploadMbps.toFloat(),
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "animatedUpload"
+    )
+
+    // Smooth numerical glide animation for Ping latency
+    val animatedPingMs by animateFloatAsState(
+        targetValue = state.pingMs.toFloat(),
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "animatedPing"
+    )
+
+    // Skeleton shimmer brush across the card surfaces during active audit
     val cardBackground = if (state.isRunning) {
         Brush.linearGradient(
             colors = listOf(
@@ -165,7 +190,7 @@ fun HiddenSpeedStabilityWidget(
             .fillMaxWidth()
             .padding(vertical = 4.dp)
     ) {
-        // Minimalist Header: LIVE AUDIT + Actions
+        // Minimalist Header: LIVE AUDIT + Close
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -182,37 +207,21 @@ fun HiddenSpeedStabilityWidget(
                 color = PurpleLavender
             )
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (state.isCompleted) {
-                    Text(
-                        text = "RETEST",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = PurpleLavender,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable(onClick = onRetest)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-                Text(
-                    text = "✕",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF64748B),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable(onClick = onDismiss)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-            }
+            Text(
+                text = "✕",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFF64748B),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable(onClick = onDismiss)
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            )
         }
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // 3 Cards: DOWNLOAD | UPLOAD | STABILITY
+        // 3 Cards: DOWNLOAD | UPLOAD | STABILITY (Generous 64dp height to prevent any text overlap)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -221,11 +230,11 @@ fun HiddenSpeedStabilityWidget(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(58.dp)
+                    .height(64.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(cardBackground)
                     .border(1.dp, cardBorder, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .padding(horizontal = 8.dp, vertical = 7.dp)
             ) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
@@ -236,24 +245,30 @@ fun HiddenSpeedStabilityWidget(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = PurpleLavender
+                        color = PurpleLavender,
+                        maxLines = 1
                     )
 
-                    Row(verticalAlignment = Alignment.Bottom) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Text(
-                            text = "%.1f".format(Locale.US, state.downloadMbps),
-                            fontSize = 17.sp,
+                            text = "%.1f".format(Locale.US, animatedDownloadMbps),
+                            fontSize = 16.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            maxLines = 1
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Text(
                             text = "Mbps",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFF94A3B8),
-                            modifier = Modifier.padding(bottom = 1.dp)
+                            modifier = Modifier.padding(bottom = 1.5.dp),
+                            maxLines = 1
                         )
                     }
                 }
@@ -263,11 +278,11 @@ fun HiddenSpeedStabilityWidget(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(58.dp)
+                    .height(64.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(cardBackground)
                     .border(1.dp, cardBorder, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .padding(horizontal = 8.dp, vertical = 7.dp)
             ) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
@@ -278,24 +293,30 @@ fun HiddenSpeedStabilityWidget(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = PurpleLavender
+                        color = PurpleLavender,
+                        maxLines = 1
                     )
 
-                    Row(verticalAlignment = Alignment.Bottom) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Text(
-                            text = "%.1f".format(Locale.US, state.uploadMbps),
-                            fontSize = 17.sp,
+                            text = "%.1f".format(Locale.US, animatedUploadMbps),
+                            fontSize = 16.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            maxLines = 1
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Text(
                             text = "Mbps",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFF94A3B8),
-                            modifier = Modifier.padding(bottom = 1.dp)
+                            modifier = Modifier.padding(bottom = 1.5.dp),
+                            maxLines = 1
                         )
                     }
                 }
@@ -305,11 +326,11 @@ fun HiddenSpeedStabilityWidget(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(58.dp)
+                    .height(64.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(cardBackground)
                     .border(1.dp, cardBorder, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .padding(horizontal = 8.dp, vertical = 7.dp)
             ) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
@@ -320,24 +341,31 @@ fun HiddenSpeedStabilityWidget(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = PurpleLavender
+                        color = PurpleLavender,
+                        maxLines = 1
                     )
 
-                    Row(verticalAlignment = Alignment.Bottom) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val pingInt = animatedPingMs.toInt()
                         Text(
-                            text = if (state.pingMs > 0) "${state.pingMs}" else "--",
-                            fontSize = 17.sp,
+                            text = if (pingInt > 0) "$pingInt" else "--",
+                            fontSize = 16.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            maxLines = 1
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
                         Text(
                             text = "ms",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFF94A3B8),
-                            modifier = Modifier.padding(bottom = 1.dp)
+                            modifier = Modifier.padding(bottom = 1.5.dp),
+                            maxLines = 1
                         )
                     }
                 }

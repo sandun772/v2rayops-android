@@ -112,6 +112,16 @@ fun DashboardScreen(
         }
     }
 
+    // Auto-hide the speed & stability HUD after 15s cooldown once audit completes
+    LaunchedEffect(quickAuditState.isCompleted, isHiddenWidgetVisible) {
+        if (quickAuditState.isCompleted && isHiddenWidgetVisible) {
+            delay(15000L) // 15-second cooldown
+            if (isHiddenWidgetVisible) {
+                isHiddenWidgetVisible = false
+            }
+        }
+    }
+
     // 3-second hold countdown effect
     LaunchedEffect(isCharging) {
         if (isCharging) {
@@ -201,7 +211,7 @@ fun DashboardScreen(
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        if (scrollState.value > 0 || isHiddenWidgetVisible) return@awaitEachGesture
+                        if (scrollState.value > 0) return@awaitEachGesture
 
                         val startY = down.position.y
                         var armed = false
@@ -265,9 +275,6 @@ fun DashboardScreen(
                         onDismiss = {
                             isHiddenWidgetVisible = false
                             viewModel.dismissQuickAudit()
-                        },
-                        onRetest = {
-                            viewModel.startQuickAudit()
                         }
                     )
                 }
