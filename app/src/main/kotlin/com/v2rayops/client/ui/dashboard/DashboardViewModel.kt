@@ -244,33 +244,42 @@ class DashboardViewModel @Inject constructor(
 
     /**
      * Executes the live speed & stability quick audit triggered by pull-down 3s hold:
+     * - Initial: Both Download and Upload show 0.0 with card surface skeleton shimmer
      * - Phase 1: Rapid multi-probe TCP edge latency & jitter variance
-     * - Phase 2: Live downlink throughput benchmark with streaming Mbps
-     * - Phase 3: Live uplink throughput benchmark
+     * - Phase 2: Downlink throughput benchmark (download increases, upload stays 0.0)
+     * - Phase 3: Uplink throughput benchmark (upload increases, download locked at final)
      */
     fun startQuickAudit() {
         if (_quickAuditState.value.isRunning) return
         viewModelScope.launch {
+            val cfg = selectedConfig.value
+            val initialPing = _livePingMs.value ?: 0L
+
+            // Explicitly initialize with both Download and Upload at 0.0
             _quickAuditState.value = QuickAuditState(
                 isRunning = true,
                 progress = 0.05f,
-                phase = "TESTING_PING"
+                phase = "TESTING_PING",
+                downloadMbps = 0.0,
+                uploadMbps = 0.0,
+                pingMs = initialPing
             )
 
-            val cfg = selectedConfig.value
-            // Phase 1: Latency & Jitter Measurement (3 consecutive samples)
+            // Phase 1: Latency & Jitter Measurement (2 quick edge probes)
             val pings = mutableListOf<Long>()
-            for (i in 1..3) {
+            for (i in 1..2) {
                 val p = diagnosticsManager.measureEdgePing(cfg)
                 if (p > 0) pings.add(p)
                 _quickAuditState.value = _quickAuditState.value.copy(
                     progress = 0.05f + (i * 0.05f),
-                    pingMs = if (pings.isNotEmpty()) pings.average().toLong() else (_livePingMs.value ?: 0L)
+                    pingMs = if (pings.isNotEmpty()) pings.average().toLong() else initialPing,
+                    downloadMbps = 0.0,
+                    uploadMbps = 0.0
                 )
-                delay(120)
+                delay(80)
             }
 
-            val avgPing = if (pings.isNotEmpty()) pings.average().toLong() else (_livePingMs.value ?: 110L)
+            val avgPing = if (pings.isNotEmpty()) pings.average().toLong() else (initialPing.takeIf { it > 0 } ?: 110L)
             val jitter = if (pings.size >= 2) {
                 (pings.maxOrNull()!! - pings.minOrNull()!!).coerceAtLeast(1L)
             } else {
@@ -288,16 +297,21 @@ class DashboardViewModel @Inject constructor(
                 pingMs = avgPing,
                 jitterMs = jitter,
                 stabilityScore = stability,
-                progress = 0.25f,
-                phase = "TESTING_DOWNLOAD"
+                progress = 0.20f,
+                phase = "TESTING_DOWNLOAD",
+                downloadMbps = 0.0,
+                uploadMbps = 0.0
             )
 
-            // Phase 2: Downlink Throughput
+            delay(150)
+
+            // Phase 2: Downlink Throughput (download increases while upload stays 0.0)
             val dlResult = benchmarkEngine.runDownloadBenchmark { progress ->
-                val currentFraction = 0.25f + (progress.progressPercent * 0.45f)
+                val currentFraction = 0.20f + (progress.progressPercent * 0.50f)
                 _quickAuditState.value = _quickAuditState.value.copy(
-                    progress = currentFraction.coerceIn(0.25f, 0.70f),
-                    downloadMbps = progress.currentSpeedMbps
+                    progress = currentFraction.coerceIn(0.20f, 0.70f),
+                    downloadMbps = progress.currentSpeedMbps,
+                    uploadMbps = 0.0
                 )
             }
             val finalDlMbps = if (dlResult.isSuccessful && dlResult.avgSpeedMbps > 0) {
@@ -308,15 +322,19 @@ class DashboardViewModel @Inject constructor(
 
             _quickAuditState.value = _quickAuditState.value.copy(
                 downloadMbps = finalDlMbps,
+                uploadMbps = 0.0,
                 progress = 0.70f,
                 phase = "TESTING_UPLOAD"
             )
 
-            // Phase 3: Uplink Throughput
+            delay(150)
+
+            // Phase 3: Uplink Throughput (upload increases while download stays at finalDlMbps)
             val ulSpeed = benchmarkEngine.runUploadBenchmark(
                 durationMs = 2500L,
                 onProgress = { currentUl ->
                     _quickAuditState.value = _quickAuditState.value.copy(
+                        downloadMbps = finalDlMbps,
                         uploadMbps = currentUl
                     )
                 }
@@ -324,6 +342,7 @@ class DashboardViewModel @Inject constructor(
             val finalUlMbps = if (ulSpeed > 0) ulSpeed else _quickAuditState.value.uploadMbps.coerceAtLeast(1.0)
 
             _quickAuditState.value = _quickAuditState.value.copy(
+                downloadMbps = finalDlMbps,
                 uploadMbps = finalUlMbps,
                 progress = 1.0f,
                 phase = "COMPLETED",
