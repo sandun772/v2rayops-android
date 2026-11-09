@@ -432,6 +432,7 @@ private fun FineTuneRunningAnimatedSection(
                 contentAlignment = Alignment.Center
             ) {
                 Column(
+                    modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -442,40 +443,25 @@ private fun FineTuneRunningAnimatedSection(
                         fontWeight = FontWeight.Black,
                         color = Color.White
                     )
+                    Spacer(modifier = Modifier.height(1.dp))
                     Text(
                         text = "~${state.estimatedSecondsRemaining}s left",
                         fontSize = 8.5.sp,
                         fontFamily = FontFamily.Monospace,
                         color = PurpleLavender
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Subtle, understated cancel action inside the progress dial
-                    Box(
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Text(
+                        text = "click to cancel",
+                        fontSize = 7.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF64748B),
+                        letterSpacing = 0.3.sp,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF0F1526))
-                            .border(0.5.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(4.dp))
                             .clickable(onClick = onCancel)
-                            .padding(horizontal = 8.dp, vertical = 2.5.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "Cancel",
-                                tint = Color(0xFF64748B),
-                                modifier = Modifier.size(9.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "click to cancel",
-                                fontSize = 7.5.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color(0xFF64748B),
-                                letterSpacing = 0.2.sp
-                            )
-                        }
-                    }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
                 }
             }
         }
