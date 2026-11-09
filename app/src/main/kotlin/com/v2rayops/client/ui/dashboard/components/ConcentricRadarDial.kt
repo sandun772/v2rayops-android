@@ -9,9 +9,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,10 +53,12 @@ import kotlin.math.sin
  * - Flat matte obsidian center power button (130dp) with razor-sharp 2dp border
  * - Luminous power icon and monospace action text (CONNECT / CANCEL / STOP)
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConcentricRadarDial(
     connectionState: ConnectionState,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isConnected = connectionState.isConnected
@@ -277,10 +280,11 @@ fun ConcentricRadarDial(
                         color = animatedBorderColor,
                         shape = CircleShape
                     )
-                    .clickable(
+                    .combinedClickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                        onClick = onClick
+                        onClick = onClick,
+                        onLongClick = onLongClick
                     ),
                 contentAlignment = Alignment.Center
             ) {

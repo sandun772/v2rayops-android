@@ -1,5 +1,6 @@
 package com.v2rayops.client.ui.dashboard
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.v2rayops.client.core.result.AppResult
@@ -13,6 +14,8 @@ import com.v2rayops.client.network.ConnectionDiagnosticResult
 import com.v2rayops.client.network.ConnectionDiagnosticsManager
 import com.v2rayops.client.network.DiagnosticStatus
 import com.v2rayops.client.network.ThroughputBenchmarkEngine
+import com.v2rayops.client.network.iphunt.IpHuntManager
+import com.v2rayops.client.network.iphunt.IpHuntState
 import com.v2rayops.client.ui.dashboard.components.SpeedOptimizationMode
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,11 +48,35 @@ class DashboardViewModel @Inject constructor(
     private val subscriptionRepository: SubscriptionRepository,
     private val vpnManager: VpnManager,
     private val diagnosticsManager: ConnectionDiagnosticsManager,
-    private val benchmarkEngine: ThroughputBenchmarkEngine
+    private val benchmarkEngine: ThroughputBenchmarkEngine,
+    private val ipHuntManager: IpHuntManager
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
     val trafficStats: StateFlow<TrafficStats> = vpnManager.trafficStats
+
+    // IP Hunt Reactive State
+    val ipHuntState: StateFlow<IpHuntState> = ipHuntManager.state
+
+    fun startIpHunt(targetPrefix: String = "100.", onMatched: (String) -> Unit = {}) {
+        ipHuntManager.startHunt(targetPrefix, onMatched)
+    }
+
+    fun stopIpHunt() {
+        ipHuntManager.stopHunt()
+    }
+
+    fun setIpHuntTargetPrefix(prefix: String) {
+        ipHuntManager.setTargetPrefix(prefix)
+    }
+
+    fun cycleIpHuntAirplaneMode(context: Context) {
+        ipHuntManager.cycleAirplaneModeManual(context)
+    }
+
+    fun setIpHuntAutoCycleRoot(enabled: Boolean) {
+        ipHuntManager.setAutoCycleRoot(enabled)
+    }
 
     val selectedConfig: StateFlow<VpnConfig?> = subscriptionRepository.observeSelectedConfig()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)

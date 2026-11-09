@@ -56,6 +56,7 @@ import com.v2rayops.client.ui.dashboard.components.ClientNavTab
 import com.v2rayops.client.ui.dashboard.components.ConcentricRadarDial
 import com.v2rayops.client.ui.dashboard.components.DigitalTimerText
 import com.v2rayops.client.ui.dashboard.components.HiddenSpeedStabilityWidget
+import com.v2rayops.client.ui.dashboard.components.IpHuntCockpitDialog
 import com.v2rayops.client.ui.dashboard.components.ProxyModeSelector
 import com.v2rayops.client.ui.dashboard.components.PullDownChargingPill
 import com.v2rayops.client.ui.dashboard.components.SpeedDividedSection
@@ -91,6 +92,8 @@ fun DashboardScreen(
         }
     }
     var showUsageCockpit by remember { mutableStateOf(false) }
+    val ipHuntState by viewModel.ipHuntState.collectAsState()
+    var showIpHuntDialog by remember { mutableStateOf(false) }
 
     var pullDistance by remember { mutableFloatStateOf(0f) }
     var isCharging by remember { mutableStateOf(false) }
@@ -302,10 +305,14 @@ fun DashboardScreen(
                 // 2. Big Digital Clock (00:00:00 or 01:24:37)
                 DigitalTimerText(connectionState = connectionState)
 
-                // 3. Center Concentric Dot Radar Dial
+                // 3. Center Concentric Dot Radar Dial (Single tap: normal connect, Hold: IP Hunter)
                 ConcentricRadarDial(
                     connectionState = connectionState,
-                    onClick = handleConnectClick
+                    onClick = handleConnectClick,
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showIpHuntDialog = true
+                    }
                 )
 
                 // 4. Download / Upload Speed Section with Dividing Lines
@@ -381,6 +388,32 @@ fun DashboardScreen(
                 selectedConfig = selectedConfig,
                 pingMs = realPingMs,
                 onDismiss = { showUsageCockpit = false }
+            )
+        }
+
+        // IP Hunt Mode Cockpit (Triggered on Press & Hold of Center Connect Dial)
+        if (showIpHuntDialog) {
+            IpHuntCockpitDialog(
+                state = ipHuntState,
+                onStartHunt = { target ->
+                    viewModel.startIpHunt(target) { matchedIp ->
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showIpHuntDialog = false
+                        handleConnectClick()
+                    }
+                },
+                onStopHunt = { viewModel.stopIpHunt() },
+                onSetTargetPrefix = { viewModel.setIpHuntTargetPrefix(it) },
+                onCycleAirplaneMode = { viewModel.cycleIpHuntAirplaneMode(context) },
+                onToggleAutoCycleRoot = { viewModel.setIpHuntAutoCycleRoot(it) },
+                onConnectNow = {
+                    showIpHuntDialog = false
+                    handleConnectClick()
+                },
+                onDismiss = {
+                    viewModel.stopIpHunt()
+                    showIpHuntDialog = false
+                }
             )
         }
     }
