@@ -82,7 +82,7 @@ fun StatusPill(
             Color(0xFF1E1405),
             Color(0xFF4A320A),
             Color(0xFFF59E0B),
-            "CHECKING TRAFFIC"
+            "CHECKING CURRENT IP..."
         )
         isSmartHunting -> Quadruple(
             Color(0xFF1E1405),

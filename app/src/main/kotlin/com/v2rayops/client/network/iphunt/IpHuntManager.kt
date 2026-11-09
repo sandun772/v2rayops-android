@@ -184,36 +184,70 @@ class IpHuntManager @Inject constructor(
 
     /**
      * Extracts active cellular IPv4 address from network interfaces.
-     * Prioritizes cellular radio interfaces (rmnet, ccmni, pdp, wwan, cell, etc.).
+     * Prioritizes Android ConnectivityManager TRANSPORT_CELLULAR (excluding VPN and USB tethering).
      */
     fun getMobileDataIp(): String? {
+        // Priority 1: Query Android's ConnectivityManager for physical TRANSPORT_CELLULAR (excluding VPN)
+        try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            if (cm != null) {
+                val mobileNet = cm.allNetworks.firstOrNull { net ->
+                    val caps = cm.getNetworkCapabilities(net) ?: return@firstOrNull false
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
+                            !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                }
+
+                if (mobileNet != null) {
+                    val lp = cm.getLinkProperties(mobileNet)
+                    val ipv4 = lp?.linkAddresses
+                        ?.map { it.address }
+                        ?.filterIsInstance<Inet4Address>()
+                        ?.firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
+                        ?.hostAddress
+
+                    if (!ipv4.isNullOrBlank()) {
+                        AppLogger.d("IpHuntManager", "getMobileDataIp from ConnectivityManager ($mobileNet): $ipv4")
+                        return ipv4
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            AppLogger.d("IpHuntManager", "ConnectivityManager cellular query failed: ${e.message}")
+        }
+
+        // Priority 2: Fallback to NetworkInterface enumeration, strictly filtering out USB/tethering/virtual
         try {
             val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces() ?: return null)
             val candidates = mutableListOf<Pair<String, String>>()
 
             for (iface in interfaces) {
-                if (!iface.isUp || iface.isLoopback) continue
                 val name = iface.name.lowercase()
+                // Strictly exclude tethering, wifi, loopback, and virtual interfaces
+                if (name.startsWith("rndis") || name.startsWith("usb") ||
+                    name.startsWith("wlan") || name.startsWith("tun") ||
+                    name.startsWith("p2p") || name.startsWith("dummy") ||
+                    iface.isLoopback) continue
+
                 for (addr in Collections.list(iface.inetAddresses)) {
-                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                    if (!addr.isLoopbackAddress && !addr.isLinkLocalAddress && addr is Inet4Address) {
                         val host = addr.hostAddress ?: continue
                         candidates.add(name to host)
                     }
                 }
             }
 
-            // 1. Cellular interface priority
+            // A. Real modem interface prefix match (ccmni for Mediatek, rmnet for Qualcomm, pdp/v4/clat/wwan)
             val cellular = candidates.find { (name, _) ->
                 name.startsWith("rmnet") || name.startsWith("ccmni") ||
                 name.startsWith("pdp") || name.startsWith("v4-") ||
                 name.startsWith("clat") || name.startsWith("wwan") ||
-                name.contains("cell") || name.startsWith("usb")
+                name.contains("cell")
             }
             if (cellular != null) {
                 return cellular.second
             }
 
-            // 2. Carrier CGNAT (100.x) or Telco Private (10.x)
+            // B. Carrier CGNAT (100.x) or Telco Private (10.x)
             val carrierSubnet = candidates.find { (_, ip) ->
                 ip.startsWith("100.") || ip.startsWith("10.")
             }
@@ -221,9 +255,7 @@ class IpHuntManager @Inject constructor(
                 return carrierSubnet.second
             }
 
-            // 3. Fallback: exclude wlan (Wi-Fi) if possible
-            val nonWifi = candidates.find { (name, _) -> !name.startsWith("wlan") }
-            return nonWifi?.second ?: candidates.firstOrNull()?.second
+            return candidates.firstOrNull()?.second
         } catch (e: Exception) {
             AppLogger.w("IpHuntManager", "Failed to query network interfaces: ${e.message}")
             return null
@@ -326,6 +358,11 @@ class IpHuntManager @Inject constructor(
             }
 
             override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                val caps = cm.getNetworkCapabilities(network)
+                if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    return
+                }
+
                 val ipv4 = linkProperties.linkAddresses
                     .map { it.address }
                     .filterIsInstance<Inet4Address>()

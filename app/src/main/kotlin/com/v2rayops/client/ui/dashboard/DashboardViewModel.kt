@@ -309,28 +309,52 @@ class DashboardViewModel @Inject constructor(
                 return@launch
             }
 
-            // Step 0: If VPN is already active, verify if it routes data
-            if (connectionState.value.isConnected) {
+            // Step 0: Check if device ALREADY has a working connection or target-matching IP!
+            if (!ipHuntManager.isAirplaneModeOn()) {
                 val currentIp = ipHuntManager.getMobileDataIp()
-                _smartHuntProgress.value = SmartHuntProgress(
-                    stage = SmartHuntStage.VERIFYING_TRAFFIC,
-                    currentCycle = 1,
-                    assignedIp = currentIp
-                )
-                val working = verifyActiveTunnelTraffic(timeoutMs = 3500L)
-                if (working) {
-                    AppLogger.i("SmartHunt", "Active VPN on IP $currentIp confirmed passing traffic! Complete.")
-                    _isSmartHunting.value = false
+                val targetPrefix = ipHuntManager.state.value.selectedTargetPrefix
+                val isStrictSubnet = targetPrefix.isNotBlank() && targetPrefix != "100." && targetPrefix != "ALL"
+                val isPrefixMatched = !isStrictSubnet || ipHuntManager.isIpMatching(currentIp, targetPrefix)
+
+                AppLogger.i("SmartHunt", "Step 0: Checking current cellular IP: $currentIp (Target: $targetPrefix, Matched: $isPrefixMatched)")
+
+                if (!currentIp.isNullOrBlank() && isPrefixMatched) {
                     _smartHuntProgress.value = SmartHuntProgress(
-                        stage = SmartHuntStage.SUCCESS,
+                        stage = SmartHuntStage.CONNECTING_VPN,
                         currentCycle = 1,
                         assignedIp = currentIp
                     )
-                    return@launch
-                } else {
-                    AppLogger.w("SmartHunt", "Active VPN on IP $currentIp is not passing traffic. Disconnecting.")
-                    vpnManager.disconnect()
-                    delay(300)
+
+                    if (!connectionState.value.isConnected) {
+                        vpnManager.connect(config)
+                        withTimeoutOrNull(6000L) {
+                            connectionState.filter { it.isConnected }.first()
+                        }
+                    }
+
+                    if (connectionState.value.isConnected) {
+                        _smartHuntProgress.value = SmartHuntProgress(
+                            stage = SmartHuntStage.VERIFYING_TRAFFIC,
+                            currentCycle = 1,
+                            assignedIp = currentIp
+                        )
+
+                        val currentWorking = verifyActiveTunnelTraffic(timeoutMs = 3000L)
+                        if (currentWorking) {
+                            AppLogger.i("SmartHunt", "Instant Success: Current IP $currentIp is ALREADY working! Locking connection.")
+                            _isSmartHunting.value = false
+                            _smartHuntProgress.value = SmartHuntProgress(
+                                stage = SmartHuntStage.SUCCESS,
+                                currentCycle = 1,
+                                assignedIp = currentIp
+                            )
+                            return@launch
+                        } else {
+                            AppLogger.w("SmartHunt", "Current IP $currentIp traffic test failed. Disconnecting and proceeding to Airplane cycle.")
+                            vpnManager.disconnect()
+                            delay(250)
+                        }
+                    }
                 }
             }
 
@@ -444,7 +468,7 @@ class DashboardViewModel @Inject constructor(
                     assignedIp = acquiredIp
                 )
 
-                val isTrafficWorking = verifyActiveTunnelTraffic(timeoutMs = 4500L)
+                val isTrafficWorking = verifyActiveTunnelTraffic(timeoutMs = 3000L)
 
                 if (!isActive || !_isSmartHunting.value) break
 
@@ -473,27 +497,24 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
-    private suspend fun verifyActiveTunnelTraffic(timeoutMs: Long = 4500L): Boolean = withContext(dispatchers.io) {
+    private suspend fun verifyActiveTunnelTraffic(timeoutMs: Long = 3000L): Boolean = withContext(dispatchers.io) {
         val start = System.currentTimeMillis()
         val initialRx = trafficStats.value.totalDownloadBytes
 
-        // 1. Direct native Xray measurement through the encrypted core pipeline
-        val nativeDelay = try {
-            val delay = vpnManager.measureDelay("https://www.google.com/generate_204")
-            if (delay <= 0) vpnManager.measureDelay("http://cp.cloudflare.com/generate_204") else delay
-        } catch (_: Exception) {
-            -1L
+        // Check if data is already accumulating
+        if (initialRx > 1024) {
+            val probeRx = trafficStats.value.totalDownloadBytes
+            delay(300)
+            if (trafficStats.value.totalDownloadBytes > probeRx + 64) {
+                AppLogger.i("SmartHunt", "Tunnel verified: active data flow detected.")
+                return@withContext true
+            }
         }
 
-        if (nativeDelay > 0) {
-            AppLogger.i("SmartHunt", "Tunnel verified via native Xray probe (Latency: ${nativeDelay}ms)!")
-            return@withContext true
-        }
-
-        // 2. OkHttp proxy probe through local inbound HTTP port 10809
+        // Fast non-blocking HTTP probe through local inbound HTTP port 10809 (strict 2000ms timeout)
         val probeUrls = listOf(
-            "http://cp.cloudflare.com/generate_204",
             "http://connectivitycheck.gstatic.com/generate_204",
+            "http://cp.cloudflare.com/generate_204",
             "http://ip-api.com/json"
         )
         for (url in probeUrls) {
@@ -501,8 +522,8 @@ class DashboardViewModel @Inject constructor(
             try {
                 val client = OkHttpClient.Builder()
                     .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809)))
-                    .connectTimeout(2500, TimeUnit.MILLISECONDS)
-                    .readTimeout(2500, TimeUnit.MILLISECONDS)
+                    .connectTimeout(2000, TimeUnit.MILLISECONDS)
+                    .readTimeout(2000, TimeUnit.MILLISECONDS)
                     .build()
 
                 val request = Request.Builder()
@@ -518,10 +539,10 @@ class DashboardViewModel @Inject constructor(
             } catch (_: Exception) {}
         }
 
-        // 3. Downlink byte accumulation check
+        // Downlink byte accumulation check
         val elapsed = System.currentTimeMillis() - start
         if (elapsed < timeoutMs) {
-            delay((timeoutMs - elapsed).coerceAtLeast(400L))
+            delay((timeoutMs - elapsed).coerceAtLeast(300L))
         }
         val finalRx = trafficStats.value.totalDownloadBytes
         if (finalRx > initialRx + 128) {
