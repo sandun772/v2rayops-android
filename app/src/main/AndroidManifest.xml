@@ -96,6 +96,26 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- Voice Interaction Service for seamless Airplane Mode toggling via Default Assistant -->
+        <service
+            android:name=".network.iphunt.assistant.V2RayOpsVoiceInteractionService"
+            android:label="@string/voice_assistant_label"
+            android:description="@string/voice_assistant_description"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/voice_interaction_service" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".network.iphunt.assistant.V2RayOpsVoiceSessionService"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true" />
+
     </application>
 
 </manifest>

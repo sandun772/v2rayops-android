@@ -1,5 +1,6 @@
 package com.v2rayops.client.network.iphunt
 
+import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,9 +10,12 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import com.v2rayops.client.core.dispatchers.AppDispatchers
 import com.v2rayops.client.core.logger.AppLogger
+import com.v2rayops.client.network.iphunt.assistant.V2RayOpsVoiceInteractionService
+import com.v2rayops.client.network.iphunt.assistant.V2RayOpsVoiceSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -37,6 +41,7 @@ data class IpHuntState(
     val selectedTargetPrefix: String = "100.",
     val isMatched: Boolean = false,
     val attempts: Int = 0,
+    val isVoiceAssistantActive: Boolean = false,
     val isRootGranted: Boolean = false,
     val isAccessibilityActive: Boolean = false,
     val isSecureSettingsGranted: Boolean = false,
@@ -44,7 +49,7 @@ data class IpHuntState(
     val statusMessage: String = "Ready to hunt"
 ) {
     val isFullyAutomated: Boolean
-        get() = isRootGranted || isAccessibilityActive || isSecureSettingsGranted
+        get() = isVoiceAssistantActive || isRootGranted || isAccessibilityActive || isSecureSettingsGranted
 }
 
 @Singleton
@@ -77,23 +82,75 @@ class IpHuntManager @Inject constructor(
 
     /**
      * Inspects device for all available automation mechanisms:
-     * 1. Superuser / Root (su)
-     * 2. Accessibility Service (IpHuntAccessibilityService)
-     * 3. WRITE_SECURE_SETTINGS permission (via ADB / Shizuku)
+     * 1. Default Digital Assistant (VoiceInteractionService + startVoiceActivity) - Zero UI Switch
+     * 2. Superuser / Root (su)
+     * 3. Accessibility Service (IpHuntAccessibilityService)
+     * 4. WRITE_SECURE_SETTINGS permission (via ADB / Shizuku)
      */
     fun refreshAutomationCapabilities() {
         scope.launch {
+            val voiceAssistantOk = isVoiceAssistantActive()
             val rootOk = checkRootPermission()
             val accessibilityOk = IpHuntAccessibilityService.isRunning() ||
                     IpHuntAccessibilityService.isAccessibilityEnabled(context)
             val secureSettingsOk = checkSecureSettingsPermission()
 
             _state.value = _state.value.copy(
+                isVoiceAssistantActive = voiceAssistantOk,
                 isRootGranted = rootOk,
                 isAccessibilityActive = accessibilityOk,
                 isSecureSettingsGranted = secureSettingsOk
             )
         }
+    }
+
+    fun isVoiceAssistantActive(): Boolean {
+        // 1. Live service instance check
+        if (V2RayOpsVoiceInteractionService.instance != null) return true
+
+        // 2. Active voice interaction service API
+        if (V2RayOpsVoiceInteractionService.isServiceActive(context)) return true
+
+        // 3. Settings.Secure "voice_interaction_service"
+        try {
+            val cur = Settings.Secure.getString(context.contentResolver, "voice_interaction_service")
+            if (cur != null && cur.contains(context.packageName)) return true
+        } catch (_: Exception) {}
+
+        // 4. Settings.Secure "assistant"
+        try {
+            val cur = Settings.Secure.getString(context.contentResolver, "assistant")
+            if (cur != null && cur.contains(context.packageName)) return true
+        } catch (_: Exception) {}
+
+        // 5. RoleManager on Android 10+ (Q+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val roleManager = context.getSystemService(RoleManager::class.java)
+                if (roleManager != null && roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
+                    return true
+                }
+            } catch (_: Exception) {}
+        }
+
+        return false
+    }
+
+    private suspend fun triggerAirplaneModeViaVoiceAssistant(enabled: Boolean): Boolean = withContext(dispatchers.main) {
+        var service = V2RayOpsVoiceInteractionService.instance
+        if (service == null) {
+            for (i in 0 until 15) {
+                delay(80)
+                service = V2RayOpsVoiceInteractionService.instance
+                if (service != null) break
+            }
+        }
+
+        if (service != null) {
+            return@withContext service.requestAirplaneMode(enabled)
+        }
+
+        false
     }
 
     suspend fun checkRootPermission(): Boolean = withContext(dispatchers.io) {
@@ -243,13 +300,29 @@ class IpHuntManager @Inject constructor(
     suspend fun ensureAirplaneModeOn(): Boolean = withContext(dispatchers.io) {
         if (isAirplaneModeOn()) return@withContext true
 
-        // Tier 1: Root
+        // Tier 1: Voice Assistant (Seamless background toggle via startVoiceActivity - ZERO UI Switch!)
+        if (isVoiceAssistantActive()) {
+            AppLogger.i("IpHuntManager", "Toggling Airplane Mode ON via Digital Assistant (Zero-Touch)...")
+            val triggered = triggerAirplaneModeViaVoiceAssistant(true)
+            if (triggered) {
+                val start = System.currentTimeMillis()
+                while (System.currentTimeMillis() - start < 3000L) {
+                    if (isAirplaneModeOn()) {
+                        AppLogger.i("IpHuntManager", "Airplane Mode ON confirmed via Voice Assistant in ${System.currentTimeMillis() - start}ms")
+                        return@withContext true
+                    }
+                    delay(60)
+                }
+            }
+        }
+
+        // Tier 2: Root
         if (_state.value.isRootGranted) {
             val rootOk = setAirplaneModeViaRoot(true)
             if (rootOk && isAirplaneModeOn()) return@withContext true
         }
 
-        // Tier 2: Real Hardware Switch Toggle via Accessibility Service
+        // Tier 3: Real Hardware Switch Toggle via Accessibility Service
         var service = IpHuntAccessibilityService.instance
         if (service == null) {
             for (i in 0 until 25) {
@@ -269,13 +342,29 @@ class IpHuntManager @Inject constructor(
     suspend fun ensureAirplaneModeOff(): Boolean = withContext(dispatchers.io) {
         if (!isAirplaneModeOn()) return@withContext true
 
-        // Tier 1: Root
+        // Tier 1: Voice Assistant (Seamless background toggle via startVoiceActivity - ZERO UI Switch!)
+        if (isVoiceAssistantActive()) {
+            AppLogger.i("IpHuntManager", "Toggling Airplane Mode OFF via Digital Assistant (Zero-Touch)...")
+            val triggered = triggerAirplaneModeViaVoiceAssistant(false)
+            if (triggered) {
+                val start = System.currentTimeMillis()
+                while (System.currentTimeMillis() - start < 3000L) {
+                    if (!isAirplaneModeOn()) {
+                        AppLogger.i("IpHuntManager", "Airplane Mode OFF confirmed via Voice Assistant in ${System.currentTimeMillis() - start}ms")
+                        return@withContext true
+                    }
+                    delay(60)
+                }
+            }
+        }
+
+        // Tier 2: Root
         if (_state.value.isRootGranted) {
             val rootOk = setAirplaneModeViaRoot(false)
             if (rootOk && !isAirplaneModeOn()) return@withContext true
         }
 
-        // Tier 2: Real Hardware Switch Toggle via Accessibility Service
+        // Tier 3: Real Hardware Switch Toggle via Accessibility Service
         var service = IpHuntAccessibilityService.instance
         if (service == null) {
             for (i in 0 until 25) {
@@ -309,24 +398,35 @@ class IpHuntManager @Inject constructor(
 
     /**
      * Executes automatic airplane mode toggle cycle using the highest available privilege tier:
-     * - Tier 1: Root command (su) -> background silent
-     * - Tier 2: WRITE_SECURE_SETTINGS -> system settings write & broadcast
-     * - Tier 3: Accessibility Service -> automated UI toggle without root
+     * - Tier 1: Digital Assistant (VoiceInteractionService + startVoiceActivity) -> 100% background seamless
+     * - Tier 2: Root command (su) -> background silent
+     * - Tier 3: WRITE_SECURE_SETTINGS -> system settings write & broadcast
+     * - Tier 4: Accessibility Service -> automated UI toggle without root
      */
     private suspend fun executeAutoAirplaneToggle(): Boolean {
-        // Tier 1: Root
+        // Tier 1: Digital Assistant (Seamless background)
+        if (isVoiceAssistantActive()) {
+            val onOk = ensureAirplaneModeOn()
+            if (onOk) {
+                delay(3000) // verified 3s hold
+                val offOk = ensureAirplaneModeOff()
+                if (offOk) return true
+            }
+        }
+
+        // Tier 2: Root
         if (_state.value.isRootGranted) {
             val rootSuccess = executeRootToggle()
             if (rootSuccess) return true
         }
 
-        // Tier 2: WRITE_SECURE_SETTINGS
+        // Tier 3: WRITE_SECURE_SETTINGS
         if (_state.value.isSecureSettingsGranted) {
             val secureSuccess = executeSecureSettingsToggle()
             if (secureSuccess) return true
         }
 
-        // Tier 3: Accessibility Service (For unrooted devices)
+        // Tier 4: Accessibility Service (For unrooted devices)
         var accessibilityService = IpHuntAccessibilityService.instance
         if (accessibilityService == null && IpHuntAccessibilityService.isAccessibilityEnabled(context)) {
             for (i in 0 until 10) {
@@ -607,6 +707,46 @@ class IpHuntManager @Inject constructor(
                 ctx.startActivity(intent)
             } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * Opens Android Digital Assistant Settings so user can set V2RayOps as default assistant with 1 tap.
+     */
+    fun openVoiceAssistantSettings(ctx: Context = context) {
+        // Try 1: RoleManager on Android 10+ (Q+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val roleManager = ctx.getSystemService(RoleManager::class.java)
+                if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
+                    val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    ctx.startActivity(intent)
+                    return
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Try 2: Settings.ACTION_VOICE_INPUT_SETTINGS
+        try {
+            val intent = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            ctx.startActivity(intent)
+            return
+        } catch (_: Exception) {}
+
+        // Try 3: Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS
+        try {
+            val intent = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            ctx.startActivity(intent)
+            return
+        } catch (_: Exception) {}
+
+        // Fallback: App Permission Settings
+        openAppPermissionSettings(ctx)
     }
 
     /**

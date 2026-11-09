@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.v2rayops.client.network.iphunt.assistant.V2RayOpsVoiceSessionService"
+    android:recognitionService="com.v2rayops.client.network.iphunt.assistant.V2RayOpsVoiceInteractionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false" />

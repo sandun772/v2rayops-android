@@ -7,4 +7,6 @@
     <string name="vpn_channel_description">Displays ongoing VPN connection status and traffic stats</string>
     <string name="accessibility_service_name">V2RayOPS Auto-Pilot</string>
     <string name="accessibility_service_description">Automates Airplane Mode cycling for IP Hunter to lock target zero-rated subnets (e.g. 100.*) without requiring root.</string>
+    <string name="voice_assistant_label">V2RayOPS Voice Assist</string>
+    <string name="voice_assistant_description">Seamless background Airplane Mode toggling for IP Hunter via Android Digital Assistant.</string>
 </resources>

@@ -106,6 +106,10 @@ class DashboardViewModel @Inject constructor(
         ipHuntManager.openAccessibilitySettings(context)
     }
 
+    fun openVoiceAssistantSettings(context: Context) {
+        ipHuntManager.openVoiceAssistantSettings(context)
+    }
+
     fun refreshIpHuntCapabilities() {
         ipHuntManager.refreshAutomationCapabilities()
     }
@@ -266,121 +270,110 @@ class DashboardViewModel @Inject constructor(
     }
 
     /**
-     * Smart Carrier Hunt & Auto-Connect:
-     * When pressed & held on the Connect button, immediately initiates a connection test.
-     * If the VPN fails to connect or doesn't route traffic on the current cellular IP,
-     * it automatically cycles Airplane Mode in background and retries until verified working.
+     * Smart Carrier Auto-Connect Watcher:
+     * When pressed & held on the Connect button, immediately checks if VPN traffic works on current IP.
+     * If not, enters the Watcher mode where the user can toggle Airplane Mode via Quick Settings.
+     * As soon as Airplane Mode is turned ON and then OFF:
+     * - Waits 5 seconds for baseband network stabilization (with animated countdown).
+     * - Dynamically locks newly assigned cellular IP.
+     * - Automatically connects VPN and verifies live traffic.
+     * - On success: stays connected! On mismatch: awaits next user quick settings toggle.
      */
     fun startSmartConnectHunt() {
         stopSmartConnectHunt()
         _isSmartHunting.value = true
 
         smartHuntJob = viewModelScope.launch(dispatchers.default) {
-            AppLogger.i("SmartHunt", "Starting Smart Carrier Hunt & Auto-Connect...")
+            AppLogger.i("SmartHunt", "Starting Smart Carrier Auto-Connect Watcher...")
 
             var cycleCount = 0
 
+            // 1. Resolve configuration
+            var config = selectedConfig.value
+            if (config == null) {
+                val code = authRepository.getSavedCustomerCode()
+                if (!code.isNullOrBlank()) {
+                    subscriptionRepository.syncConfigs(code)
+                }
+                config = selectedConfig.value ?: subscriptionRepository.observeConfigs().first().firstOrNull()
+            }
+
+            if (config == null) {
+                AppLogger.w("SmartHunt", "No active VPN configuration found. Halting hunt.")
+                _isSmartHunting.value = false
+                _smartHuntProgress.value = SmartHuntProgress(SmartHuntStage.IDLE)
+                return@launch
+            }
+
+            // Step 0: Check if VPN already routes traffic on current cellular IP
+            if (!ipHuntManager.isAirplaneModeOn()) {
+                val currentIp = ipHuntManager.getMobileDataIp()
+                AppLogger.i("SmartHunt", "Step 0: Checking if VPN already works on current IP ($currentIp)...")
+                _smartHuntProgress.value = SmartHuntProgress(
+                    stage = SmartHuntStage.CHECKING_VPN,
+                    currentCycle = 1,
+                    assignedIp = currentIp
+                )
+
+                if (!connectionState.value.isConnected) {
+                    vpnManager.connect(config)
+                }
+
+                val alreadyWorks = verifyVpnWorkingWithTimeout(timeoutMs = 4000L)
+                if (alreadyWorks) {
+                    AppLogger.i("SmartHunt", "VPN is already active & routing traffic on IP $currentIp! Complete.")
+                    _isSmartHunting.value = false
+                    _smartHuntProgress.value = SmartHuntProgress(
+                        stage = SmartHuntStage.SUCCESS,
+                        currentCycle = 1,
+                        assignedIp = currentIp
+                    )
+                    return@launch
+                }
+
+                AppLogger.w("SmartHunt", "Traffic check failed on IP $currentIp. Disconnecting & awaiting Airplane cycle...")
+                vpnManager.disconnect()
+                delay(300)
+            }
+
+            // Continuous watcher loop until working IP is secured
             while (isActive && _isSmartHunting.value) {
                 cycleCount++
 
-                // 1. Resolve configuration
-                var config = selectedConfig.value
-                if (config == null) {
-                    val code = authRepository.getSavedCustomerCode()
-                    if (!code.isNullOrBlank()) {
-                        subscriptionRepository.syncConfigs(code)
-                    }
-                    config = selectedConfig.value ?: subscriptionRepository.observeConfigs().first().firstOrNull()
-                }
-
-                if (config == null) {
-                    AppLogger.w("SmartHunt", "No active VPN configuration found. Halting hunt.")
-                    _isSmartHunting.value = false
-                    _smartHuntProgress.value = SmartHuntProgress(SmartHuntStage.IDLE)
-                    break
-                }
-
-                // Clean disconnect if currently connected
-                if (connectionState.value.isConnected || connectionState.value.isConnecting) {
-                    vpnManager.disconnect()
-                    delay(250)
-                }
-
-                // Safety check: If Airplane Mode is currently ON before hunt starts, turn it OFF first
-                if (ipHuntManager.isAirplaneModeOn()) {
-                    _smartHuntProgress.value = SmartHuntProgress(SmartHuntStage.TURNING_OFF_AIRPLANE, currentCycle = cycleCount)
-                    ipHuntManager.ensureAirplaneModeOff()
-                    delay(500)
-                }
-
-                if (!isActive || !_isSmartHunting.value) break
-
-                // ==========================================
-                // PHASE 1: TURN AIRPLANE MODE ON
-                // ==========================================
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Turning Airplane Mode ON...")
-                _smartHuntProgress.value = SmartHuntProgress(
-                    stage = SmartHuntStage.TURNING_ON_AIRPLANE,
-                    currentCycle = cycleCount
-                )
-                _isCyclingAirplaneMode.value = true
-
-                val turnedOn = try {
-                    ipHuntManager.ensureAirplaneModeOn()
-                } catch (_: Exception) {
-                    false
-                }
-
-                if (!turnedOn || !ipHuntManager.isAirplaneModeOn()) {
-                    AppLogger.w("SmartHunt", "Could not turn Airplane Mode ON. Retrying...")
-                    _isCyclingAirplaneMode.value = false
-                    delay(1000)
-                    continue
-                }
-
-                // ==========================================
-                // PHASE 2: HOLD IN AIRPLANE MODE FOR EXACTLY 3 SECONDS
-                // (Only when it is completely ON!)
-                // ==========================================
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode is 100% ON. Holding for 3 seconds...")
-                for (sec in 3 downTo 1) {
-                    if (!isActive || !_isSmartHunting.value) break
+                // PHASE 1: Wait for user to turn Airplane Mode ON
+                if (!ipHuntManager.isAirplaneModeOn()) {
+                    AppLogger.i("SmartHunt", "Cycle #$cycleCount: Waiting for Airplane Mode ON in Quick Settings...")
                     _smartHuntProgress.value = SmartHuntProgress(
-                        stage = SmartHuntStage.AIRPLANE_ON_HOLD,
-                        countdownSeconds = sec,
-                        currentCycle = cycleCount
+                        stage = SmartHuntStage.WAITING_AIRPLANE_ON,
+                        currentCycle = cycleCount,
+                        assignedIp = ipHuntManager.getMobileDataIp()
                     )
-                    delay(1000)
+                    _isCyclingAirplaneMode.value = true
+
+                    while (isActive && _isSmartHunting.value && !ipHuntManager.isAirplaneModeOn()) {
+                        delay(200)
+                    }
                 }
 
                 if (!isActive || !_isSmartHunting.value) break
 
-                // ==========================================
-                // PHASE 3: TURN AIRPLANE MODE OFF
-                // ==========================================
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Turning Airplane Mode OFF...")
+                // PHASE 2: User turned Airplane Mode ON! Now wait for user to turn it OFF
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode is ON! Waiting for user to disable it...")
                 _smartHuntProgress.value = SmartHuntProgress(
-                    stage = SmartHuntStage.TURNING_OFF_AIRPLANE,
+                    stage = SmartHuntStage.AIRPLANE_ON,
                     currentCycle = cycleCount
                 )
 
-                val turnedOff = try {
-                    ipHuntManager.ensureAirplaneModeOff()
-                } catch (_: Exception) {
-                    false
+                while (isActive && _isSmartHunting.value && ipHuntManager.isAirplaneModeOn()) {
+                    delay(200)
                 }
+
+                if (!isActive || !_isSmartHunting.value) break
+
+                // PHASE 3: Airplane Mode turned OFF! Give 5 seconds for network to stabilize
                 _isCyclingAirplaneMode.value = false
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode turned OFF! Stabilizing network for 5 seconds...")
 
-                if (!turnedOff || ipHuntManager.isAirplaneModeOn()) {
-                    AppLogger.w("SmartHunt", "Could not turn Airplane Mode OFF. Retrying...")
-                    delay(1000)
-                    continue
-                }
-
-                // ==========================================
-                // PHASE 4: GIVE 5 SECONDS FOR NETWORK TO STABILIZE
-                // ==========================================
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode OFF confirmed. Giving 5s for network to stabilize...")
                 var acquiredIp: String? = null
                 for (sec in 5 downTo 1) {
                     if (!isActive || !_isSmartHunting.value) break
@@ -398,9 +391,9 @@ class DashboardViewModel @Inject constructor(
 
                 if (!isActive || !_isSmartHunting.value) break
 
-                // If carrier IP hasn't appeared yet, wait up to 4s more
+                // Grace delay if IP hasn't appeared yet
                 if (acquiredIp.isNullOrBlank()) {
-                    for (i in 0 until 8) {
+                    for (i in 0 until 6) {
                         val ip = ipHuntManager.getMobileDataIp()
                         if (!ip.isNullOrBlank()) {
                             acquiredIp = ip
@@ -411,11 +404,9 @@ class DashboardViewModel @Inject constructor(
                 }
 
                 val finalIp = acquiredIp ?: ipHuntManager.getMobileDataIp()
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Network stabilized with IP: $finalIp. Connecting VPN...")
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Network stabilized with IP: $finalIp. Auto-connecting VPN...")
 
-                // ==========================================
-                // PHASE 5: CONNECT VPN & TEST TRAFFIC
-                // ==========================================
+                // PHASE 4: AUTO-CONNECT VPN & TEST TRAFFIC
                 _smartHuntProgress.value = SmartHuntProgress(
                     stage = SmartHuntStage.CONNECTING_VPN,
                     currentCycle = cycleCount,
@@ -429,9 +420,9 @@ class DashboardViewModel @Inject constructor(
 
                 vpnManager.connect(config)
 
-                val isWorking = verifyVpnWorkingWithTimeout(timeoutMs = 5000L)
+                val isWorking = verifyVpnWorkingWithTimeout(timeoutMs = 7000L)
                 if (isWorking) {
-                    AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: VPN is active and passing traffic on IP $finalIp!")
+                    AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: VPN verified working on IP $finalIp!")
                     _isSmartHunting.value = false
                     _smartHuntProgress.value = SmartHuntProgress(
                         stage = SmartHuntStage.SUCCESS,
@@ -443,7 +434,7 @@ class DashboardViewModel @Inject constructor(
 
                 if (!isActive || !_isSmartHunting.value) break
 
-                AppLogger.w("SmartHunt", "Cycle #$cycleCount: Traffic test failed on IP $finalIp. Disconnecting & recycling...")
+                AppLogger.w("SmartHunt", "Cycle #$cycleCount: VPN traffic check failed on IP $finalIp. Disconnecting & awaiting next cycle...")
                 vpnManager.disconnect()
                 delay(300)
             }
@@ -497,14 +488,9 @@ class DashboardViewModel @Inject constructor(
     private suspend fun testTrafficThroughProxy(maxWaitMs: Long): Boolean = withContext(dispatchers.io) {
         if (ipHuntManager.isAirplaneModeOn()) return@withContext false
 
-        // Test 1: Check if download bytes already accumulating
         val initialRx = trafficStats.value.totalDownloadBytes
-        if (initialRx > 2048) {
-            AppLogger.d("SmartHunt", "Tunnel already received $initialRx bytes. Confirmed working.")
-            return@withContext true
-        }
 
-        // Test 2: Fast HTTP 204 probe through local proxy 127.0.0.1:10809
+        // Fast HTTP 204 probe through local proxy 127.0.0.1:10809
         val probeUrls = listOf(
             "http://cp.cloudflare.com/generate_204",
             "http://connectivitycheck.gstatic.com/generate_204"
@@ -536,7 +522,7 @@ class DashboardViewModel @Inject constructor(
 
         // Final check: did totalDownloadBytes increase during probe?
         val finalRx = trafficStats.value.totalDownloadBytes
-        if (finalRx > initialRx + 512) {
+        if (finalRx > initialRx + 256) {
             AppLogger.d("SmartHunt", "totalDownloadBytes increased from $initialRx to $finalRx. Tunnel confirmed passing traffic.")
             return@withContext true
         }

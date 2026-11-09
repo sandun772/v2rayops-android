@@ -202,21 +202,12 @@ fun DashboardScreen(
 
     val handleStartSmartHunt = {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        viewModel.refreshIpHuntCapabilities()
-        val isAutomated = ipHuntState.isFullyAutomated ||
-                IpHuntAccessibilityService.isAccessibilityEnabled(context) ||
-                IpHuntAccessibilityService.isRunning()
-        if (!isAutomated) {
-            Toast.makeText(context, "Please enable V2RayOps in Accessibility Settings to automate IP Hunting", Toast.LENGTH_LONG).show()
-            viewModel.openAccessibilitySettings(context)
+        val prepareIntent = VpnService.prepare(context)
+        if (prepareIntent != null) {
+            pendingSmartHuntAction = true
+            vpnPrepareLauncher.launch(prepareIntent)
         } else {
-            val prepareIntent = VpnService.prepare(context)
-            if (prepareIntent != null) {
-                pendingSmartHuntAction = true
-                vpnPrepareLauncher.launch(prepareIntent)
-            } else {
-                viewModel.startSmartConnectHunt()
-            }
+            viewModel.startSmartConnectHunt()
         }
     }
 

@@ -25,6 +25,7 @@ class V2RayOpsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLogger.initLogFile(filesDir)
         AppLogger.i("V2RayOpsApp", "Initializing V2RayOPS Application Foundation")
         
         // Fully asynchronous initialization on background thread: leaves Main UI thread 100% free!

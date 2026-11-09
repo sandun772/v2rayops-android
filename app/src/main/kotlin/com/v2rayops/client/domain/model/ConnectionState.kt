@@ -31,9 +31,8 @@ data class TrafficStats(
 enum class SmartHuntStage {
     IDLE,
     CHECKING_VPN,
-    TURNING_ON_AIRPLANE,
-    AIRPLANE_ON_HOLD,
-    TURNING_OFF_AIRPLANE,
+    WAITING_AIRPLANE_ON,
+    AIRPLANE_ON,
     STABILIZING_NETWORK,
     CONNECTING_VPN,
     SUCCESS

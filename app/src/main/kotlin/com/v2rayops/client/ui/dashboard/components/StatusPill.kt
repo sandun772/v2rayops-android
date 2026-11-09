@@ -36,23 +36,17 @@ fun StatusPill(
     val isConnecting = smartHuntProgress.isActive || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
     val (bg, border, textColor, text) = when {
-        smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON_HOLD -> Quadruple(
+        smartHuntProgress.stage == SmartHuntStage.WAITING_AIRPLANE_ON -> Quadruple(
             Color(0xFF240A12),
             Color(0xFF5E1B2C),
             Color(0xFFFB7185),
-            "AIRPLANE ON • ${smartHuntProgress.countdownSeconds}s"
+            "TOGGLE AIRPLANE ON"
         )
-        smartHuntProgress.stage == SmartHuntStage.TURNING_ON_AIRPLANE || (isCyclingAirplane && !smartHuntProgress.isActive) -> Quadruple(
-            Color(0xFF240A12),
-            Color(0xFF5E1B2C),
-            Color(0xFFFB7185),
-            "ENABLING AIRPLANE"
-        )
-        smartHuntProgress.stage == SmartHuntStage.TURNING_OFF_AIRPLANE -> Quadruple(
+        smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON -> Quadruple(
             Color(0xFF1E1405),
             Color(0xFF4A320A),
             Color(0xFFF59E0B),
-            "DISABLING AIRPLANE"
+            "AIRPLANE ON • TURN OFF"
         )
         smartHuntProgress.stage == SmartHuntStage.STABILIZING_NETWORK -> Quadruple(
             Color(0xFF041B1C),
@@ -60,11 +54,17 @@ fun StatusPill(
             Color(0xFF06B6D4),
             "STABILIZING • ${smartHuntProgress.countdownSeconds}s"
         )
-        smartHuntProgress.stage == SmartHuntStage.CHECKING_VPN || smartHuntProgress.stage == SmartHuntStage.CONNECTING_VPN -> Quadruple(
+        smartHuntProgress.stage == SmartHuntStage.CHECKING_VPN -> Quadruple(
             Color(0xFF1E1405),
             Color(0xFF4A320A),
             Color(0xFFF59E0B),
-            "HUNTING IP"
+            "CHECKING TRAFFIC"
+        )
+        smartHuntProgress.stage == SmartHuntStage.CONNECTING_VPN -> Quadruple(
+            Color(0xFF1E1405),
+            Color(0xFF4A320A),
+            Color(0xFFF59E0B),
+            "AUTO-CONNECTING"
         )
         isSmartHunting -> Quadruple(
             Color(0xFF1E1405),

@@ -68,9 +68,8 @@ fun ConcentricRadarDial(
     modifier: Modifier = Modifier
 ) {
     val isAirplanePhase = isCyclingAirplane ||
-            smartHuntProgress.stage == SmartHuntStage.TURNING_ON_AIRPLANE ||
-            smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON_HOLD ||
-            smartHuntProgress.stage == SmartHuntStage.TURNING_OFF_AIRPLANE
+            smartHuntProgress.stage == SmartHuntStage.WAITING_AIRPLANE_ON ||
+            smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON
 
     val isStabilizingPhase = smartHuntProgress.stage == SmartHuntStage.STABILIZING_NETWORK
 
@@ -135,6 +134,7 @@ fun ConcentricRadarDial(
     )
 
     val actionText = when {
+        isSmartHunting -> if (isConnecting) "CONNECTING" else "CANCEL"
         isConnecting -> "CANCEL"
         isConnected -> "STOP"
         else -> "CONNECT"

@@ -82,6 +82,7 @@ fun IpHuntCockpitDialog(
     onStartHunt: (String) -> Unit,
     onStopHunt: () -> Unit,
     onSetTargetPrefix: (String) -> Unit,
+    onOpenVoiceAssistantSettings: () -> Unit = {},
     onOpenAccessibilitySettings: () -> Unit,
     onOpenAppPermissionSettings: () -> Unit,
     onOpenAirplaneSettings: () -> Unit,
@@ -457,9 +458,16 @@ fun IpHuntCockpitDialog(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             val methodText = when {
+                                state.isVoiceAssistantActive -> "DIGITAL ASSISTANT AUTO-PILOT ACTIVE"
                                 state.isRootGranted -> "ROOT ZERO-TOUCH ACTIVE"
                                 state.isAccessibilityActive -> "ACCESSIBILITY AUTO-PILOT ACTIVE"
                                 else -> "SECURE SETTINGS AUTOMATION ACTIVE"
+                            }
+                            val methodSubtext = when {
+                                state.isVoiceAssistantActive -> "Zero-touch background airplane mode cycling via Digital Assistant"
+                                state.isRootGranted -> "Zero-touch root command airplane cycling"
+                                state.isAccessibilityActive -> "Automated accessibility gesture airplane cycling"
+                                else -> "Airplane Mode cycles automatically in background until IP matches"
                             }
                             Text(
                                 text = methodText,
@@ -469,7 +477,7 @@ fun IpHuntCockpitDialog(
                                 color = Color.White
                             )
                             Text(
-                                text = "Airplane Mode cycles automatically in background until IP matches",
+                                text = methodSubtext,
                                 fontSize = 7.5.sp,
                                 fontFamily = FontFamily.Monospace,
                                 color = Color(0xFF64748B)
@@ -496,7 +504,7 @@ fun IpHuntCockpitDialog(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "AUTOMATION PERMISSION REQUIRED",
+                                text = "AUTOMATION SETUP REQUIRED",
                                 fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -505,7 +513,7 @@ fun IpHuntCockpitDialog(
                         }
 
                         Text(
-                            text = "To allow the app to cycle airplane mode automatically without manual tapping, enable Auto-Pilot in Accessibility:",
+                            text = "Set V2RayOPS as your Digital Assistant for seamless zero-touch background toggling (no settings window switch), or enable Accessibility:",
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFF94A3B8),
@@ -513,46 +521,70 @@ fun IpHuntCockpitDialog(
                         )
 
                         // Action Buttons Row
-                        Row(
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            // Primary: Enable Auto-Pilot in Accessibility Settings
+                            // Primary: Enable Assistant (Recommended)
                             Box(
                                 modifier = Modifier
-                                    .weight(1.3f)
+                                    .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(PurplePrimary)
-                                    .clickable { onOpenAccessibilitySettings() }
+                                    .clickable { onOpenVoiceAssistantSettings() }
                                     .padding(vertical = 7.dp, horizontal = 6.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "ENABLE AUTO-PILOT",
-                                    fontSize = 9.sp,
+                                    text = "SET AS DIGITAL ASSISTANT (RECOMMENDED)",
+                                    fontSize = 8.5.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                             }
 
-                            // Secondary: App Permissions Settings
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF1E283E))
-                                    .clickable { onOpenAppPermissionSettings() }
-                                    .padding(vertical = 7.dp, horizontal = 6.dp),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = "APP INFO",
-                                    fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = PurpleLavender
-                                )
+                                // Secondary: Enable Auto-Pilot in Accessibility Settings
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1.2f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF1E283E))
+                                        .clickable { onOpenAccessibilitySettings() }
+                                        .padding(vertical = 6.dp, horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "ACCESSIBILITY",
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PurpleLavender
+                                    )
+                                }
+
+                                // Tertiary: App Permissions Settings
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF161F30))
+                                        .clickable { onOpenAppPermissionSettings() }
+                                        .padding(vertical = 6.dp, horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "APP INFO",
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                }
                             }
                         }
                     }

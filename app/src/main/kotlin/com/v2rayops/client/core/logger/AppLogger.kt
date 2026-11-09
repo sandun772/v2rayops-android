@@ -43,6 +43,16 @@ data class LogEntry(
 object AppLogger {
     private const val DEFAULT_TAG = "V2RayOps"
     private const val MAX_LOGS = 1000
+    private var logFile: java.io.File? = null
+
+    fun initLogFile(dir: java.io.File) {
+        try {
+            logFile = java.io.File(dir, "app_debug.log")
+            if (logFile?.exists() == true && (logFile?.length() ?: 0) > 2 * 1024 * 1024) {
+                logFile?.delete()
+            }
+        } catch (_: Exception) {}
+    }
 
     private val _logsFlow = MutableStateFlow<List<LogEntry>>(emptyList())
     val logsFlow: StateFlow<List<LogEntry>> = _logsFlow.asStateFlow()
@@ -85,6 +95,9 @@ object AppLogger {
             logBuffer.pollFirst()
         }
         _logsFlow.value = logBuffer.toList()
+        try {
+            logFile?.appendText(entry.toFormattedLine() + "\n")
+        } catch (_: Exception) {}
     }
 
     fun clear() {
