@@ -51,6 +51,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.v2rayops.client.domain.model.ConnectionState
+import com.v2rayops.client.network.iphunt.IpHuntAccessibilityService
 import com.v2rayops.client.ui.dashboard.components.ActiveNodeSummaryCard
 import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
 import com.v2rayops.client.ui.dashboard.components.ClientNavTab
@@ -201,7 +202,11 @@ fun DashboardScreen(
 
     val handleStartSmartHunt = {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        if (!ipHuntState.isFullyAutomated) {
+        viewModel.refreshIpHuntCapabilities()
+        val isAutomated = ipHuntState.isFullyAutomated ||
+                IpHuntAccessibilityService.isAccessibilityEnabled(context) ||
+                IpHuntAccessibilityService.isRunning()
+        if (!isAutomated) {
             Toast.makeText(context, "Please enable V2RayOps in Accessibility Settings to automate IP Hunting", Toast.LENGTH_LONG).show()
             viewModel.openAccessibilitySettings(context)
         } else {

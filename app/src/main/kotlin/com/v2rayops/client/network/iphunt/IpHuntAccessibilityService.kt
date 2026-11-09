@@ -122,53 +122,103 @@ class IpHuntAccessibilityService : AccessibilityService() {
         return finalResult
     }
 
+    private fun getAirplaneSettingsIntents(): List<Intent> {
+        val list = mutableListOf<Intent>()
+
+        // 1. Vivo / FuntouchOS / OriginOS dedicated network settings activity
+        if (Build.MANUFACTURER.contains("vivo", ignoreCase = true) || Build.BRAND.contains("vivo", ignoreCase = true)) {
+            list.add(
+                Intent().apply {
+                    setClassName("com.android.settings", "com.android.settings.Settings\$ExtraNetworkConnectionActivity")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+            )
+        }
+
+        // 2. Standard Android Airplane Mode settings
+        list.add(
+            Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        )
+
+        // 3. Wireless settings
+        list.add(
+            Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        )
+
+        // 4. Main Settings fallback
+        list.add(
+            Intent(Settings.ACTION_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        )
+
+        return list
+    }
+
     private suspend fun executeSettingsToggleTo(targetState: Boolean): Boolean {
         if (isAirplaneModeOn(this) == targetState) return true
 
-        val intent = Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        startActivity(intent)
+        val intents = getAirplaneSettingsIntents()
 
-        delay(400)
+        for (intent in intents) {
+            if (isAirplaneModeOn(this) == targetState) return true
 
-        var switchNode: AccessibilityNodeInfo? = null
-        var switchBounds = Rect()
-
-        val searchStart = System.currentTimeMillis()
-        while (System.currentTimeMillis() - searchStart < 4000L) {
-            val root = rootInActiveWindow
-            if (root != null) {
-                val found = findAirplaneSwitchAndBounds(root)
-                if (found != null) {
-                    switchNode = found.first
-                    switchBounds = found.second
-                    break
-                }
-                val clicked = clickNetworkCategoryIfPresent(root)
-                if (clicked) {
-                    delay(500)
-                    continue
-                }
-            }
-            delay(150)
-        }
-
-        if (switchNode == null || switchBounds.isEmpty) return false
-
-        if (isAirplaneModeOn(this) != targetState) {
-            clickSwitch(switchNode, switchBounds)
-
-            val waitStart = System.currentTimeMillis()
-            while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - waitStart < 2500L) {
-                delay(150)
+            try {
+                startActivity(intent)
+            } catch (_: Exception) {
+                continue
             }
 
-            if (isAirplaneModeOn(this) != targetState && !switchBounds.isEmpty) {
-                dispatchTouchTap(switchBounds.centerX().toFloat(), switchBounds.centerY().toFloat())
-                val retryStart = System.currentTimeMillis()
-                while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - retryStart < 1500L) {
-                    delay(150)
+            delay(350)
+
+            var switchNode: AccessibilityNodeInfo? = null
+            var switchBounds = Rect()
+
+            val searchStart = System.currentTimeMillis()
+            while (System.currentTimeMillis() - searchStart < 3500L) {
+                if (isAirplaneModeOn(this) == targetState) return true
+
+                val root = rootInActiveWindow
+                if (root != null) {
+                    val found = findAirplaneSwitchAndBounds(root)
+                    if (found != null) {
+                        switchNode = found.first
+                        switchBounds = found.second
+                        break
+                    }
+                    val clicked = clickNetworkCategoryIfPresent(root)
+                    if (clicked) {
+                        delay(400)
+                        continue
+                    }
+                }
+                delay(120)
+            }
+
+            if (switchNode != null && !switchBounds.isEmpty) {
+                if (isAirplaneModeOn(this) != targetState) {
+                    clickSwitch(switchNode, switchBounds)
+
+                    val waitStart = System.currentTimeMillis()
+                    while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - waitStart < 1500L) {
+                        delay(100)
+                    }
+
+                    if (isAirplaneModeOn(this) != targetState && !switchBounds.isEmpty) {
+                        dispatchTouchTap(switchBounds.centerX().toFloat(), switchBounds.centerY().toFloat())
+                        val retryStart = System.currentTimeMillis()
+                        while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - retryStart < 1500L) {
+                            delay(100)
+                        }
+                    }
+                }
+
+                if (isAirplaneModeOn(this) == targetState) {
+                    return true
                 }
             }
         }
@@ -310,15 +360,18 @@ class IpHuntAccessibilityService : AccessibilityService() {
      * - Also checks direct switch IDs (android:id/checkbox on Vivo, switch_widget on AOSP, etc.)
      */
     private fun findAirplaneSwitchAndBounds(root: AccessibilityNodeInfo): Pair<AccessibilityNodeInfo, Rect>? {
-        // Strategy A: Find row with text "Airplane mode" / "Flight mode"
         val keywords = listOf("Airplane mode", "Flight mode", "Airplane", "Flight")
         for (kw in keywords) {
             val textNodes = root.findAccessibilityNodeInfosByText(kw)
             for (tn in textNodes) {
+                val text = tn.text?.toString() ?: ""
+                if (text.length > 35) continue
+
                 val rowRect = Rect()
                 tn.getBoundsInScreen(rowRect)
+                if (rowRect.isEmpty) continue
 
-                // Search siblings/ancestors for switch
+                // 1. Search in parent hierarchy (up to 4 levels)
                 var parent: AccessibilityNodeInfo? = tn
                 for (depth in 0..4) {
                     parent = parent?.parent ?: break
@@ -326,55 +379,29 @@ class IpHuntAccessibilityService : AccessibilityService() {
                     for (i in 0 until count) {
                         val child = parent.getChild(i) ?: continue
                         val cName = child.className?.toString() ?: ""
-                        if (child.isCheckable || cName.contains("Switch") || cName.contains("CompoundButton") || child.viewIdResourceName?.contains("checkbox") == true) {
+                        val id = child.viewIdResourceName ?: ""
+                        if (child.isCheckable || cName.contains("Switch") || cName.contains("Button") || id.contains("checkbox") || id.contains("switch")) {
                             val rect = Rect()
                             child.getBoundsInScreen(rect)
-                            if (!rect.isEmpty) return Pair(child, rect)
+                            if (!rect.isEmpty && rect.top >= rowRect.top - 80 && rect.bottom <= rowRect.bottom + 80) {
+                                return Pair(child, rect)
+                            }
                         }
                     }
                 }
 
-                // If switch was in separate layout container on the right side of the row (e.g. Vivo Funtouch OS)
+                // 2. If switch was in separate layout container on the right side of the row (e.g. Vivo Funtouch OS)
                 // Search all switches on screen that share the same vertical Y coordinate range
                 val allSwitches = findAllSwitches(root)
                 for (s in allSwitches) {
                     val sRect = Rect()
                     s.getBoundsInScreen(sRect)
-                    if (sRect.top >= rowRect.top - 60 && sRect.bottom <= rowRect.bottom + 60) {
+                    if (sRect.top >= rowRect.top - 80 && sRect.bottom <= rowRect.bottom + 80) {
                         return Pair(s, sRect)
                     }
                 }
             }
         }
-
-        // Strategy B: Direct ID search (Vivo uses android:id/checkbox, AOSP uses switch_widget)
-        val knownIds = listOf(
-            "android:id/checkbox",
-            "android:id/switch_widget",
-            "com.android.settings:id/switch_widget",
-            "com.android.settings:id/switch_button",
-            "com.android.settings:id/main_switch",
-            "com.android.settings:id/main_switch_button"
-        )
-        for (id in knownIds) {
-            val nodes = root.findAccessibilityNodeInfosByViewId(id)
-            if (nodes.isNotEmpty()) {
-                val first = nodes.first()
-                val rect = Rect()
-                first.getBoundsInScreen(rect)
-                if (!rect.isEmpty) return Pair(first, rect)
-            }
-        }
-
-        // Strategy C: First checkable switch on screen
-        val anySwitches = findAllSwitches(root)
-        if (anySwitches.isNotEmpty()) {
-            val first = anySwitches.first()
-            val rect = Rect()
-            first.getBoundsInScreen(rect)
-            if (!rect.isEmpty) return Pair(first, rect)
-        }
-
         return null
     }
 
@@ -396,7 +423,13 @@ class IpHuntAccessibilityService : AccessibilityService() {
     }
 
     private fun clickSwitch(node: AccessibilityNodeInfo, bounds: Rect): Boolean {
-        // 1. Try standard Accessibility action
+        // 1. Physical touch gesture directly to the switch center (most reliable across all Android versions/OEMs)
+        if (!bounds.isEmpty && bounds.centerX() > 0 && bounds.centerY() > 0) {
+            val tapped = dispatchTouchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+            if (tapped) return true
+        }
+
+        // 2. Try standard accessibility action
         if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             return true
         }
@@ -406,11 +439,6 @@ class IpHuntAccessibilityService : AccessibilityService() {
                 return true
             }
             p = p.parent
-        }
-
-        // 2. Fallback: physical touch gesture if accessibility action wasn't handled
-        if (!bounds.isEmpty && bounds.centerX() > 0 && bounds.centerY() > 0) {
-            return dispatchTouchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
         }
         return false
     }

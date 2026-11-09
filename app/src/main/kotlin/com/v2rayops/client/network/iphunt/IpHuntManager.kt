@@ -249,10 +249,16 @@ class IpHuntManager @Inject constructor(
             if (rootOk && isAirplaneModeOn()) return@withContext true
         }
 
-        // Tier 2: Accessibility Service
+        // Tier 2: Write Secure Settings
+        if (_state.value.isSecureSettingsGranted || checkSecureSettingsPermission()) {
+            val secureOk = setAirplaneModeViaSecureSettings(true)
+            if (secureOk && isAirplaneModeOn()) return@withContext true
+        }
+
+        // Tier 3: Accessibility Service
         var service = IpHuntAccessibilityService.instance
-        if (service == null && IpHuntAccessibilityService.isAccessibilityEnabled(context)) {
-            for (i in 0 until 15) {
+        if (service == null) {
+            for (i in 0 until 20) {
                 delay(100)
                 service = IpHuntAccessibilityService.instance
                 if (service != null) break
@@ -275,10 +281,16 @@ class IpHuntManager @Inject constructor(
             if (rootOk && !isAirplaneModeOn()) return@withContext true
         }
 
-        // Tier 2: Accessibility Service
+        // Tier 2: Write Secure Settings
+        if (_state.value.isSecureSettingsGranted || checkSecureSettingsPermission()) {
+            val secureOk = setAirplaneModeViaSecureSettings(false)
+            if (secureOk && !isAirplaneModeOn()) return@withContext true
+        }
+
+        // Tier 3: Accessibility Service
         var service = IpHuntAccessibilityService.instance
-        if (service == null && IpHuntAccessibilityService.isAccessibilityEnabled(context)) {
-            for (i in 0 until 15) {
+        if (service == null) {
+            for (i in 0 until 20) {
                 delay(100)
                 service = IpHuntAccessibilityService.instance
                 if (service != null) break
@@ -290,6 +302,21 @@ class IpHuntManager @Inject constructor(
         }
 
         false
+    }
+
+    private fun setAirplaneModeViaSecureSettings(enable: Boolean): Boolean {
+        return try {
+            Settings.Global.putInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, if (enable) 1 else 0)
+            try {
+                val intent = Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED).apply {
+                    putExtra("state", enable)
+                }
+                context.sendBroadcast(intent)
+            } catch (_: Exception) {}
+            isAirplaneModeOn() == enable
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private suspend fun setAirplaneModeViaRoot(enable: Boolean): Boolean = withContext(dispatchers.io) {

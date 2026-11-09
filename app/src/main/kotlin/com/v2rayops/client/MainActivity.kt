@@ -8,13 +8,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.navigation.compose.rememberNavController
 import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.designsystem.theme.V2RayOpsTheme
+import com.v2rayops.client.network.iphunt.IpHuntManager
 import com.v2rayops.client.ui.navigation.AppNavGraph
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    @Inject
+    lateinit var ipHuntManager: IpHuntManager
+
     private val deepLinkCode = mutableStateOf<String?>(null)
+
+    override fun onResume() {
+        super.onResume()
+        ipHuntManager.refreshAutomationCapabilities()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_V2RayOps)
