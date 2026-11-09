@@ -185,6 +185,61 @@ class IpHuntManager @Inject constructor(
         )
     }
 
+    fun isAirplaneModeOn(): Boolean = IpHuntAccessibilityService.isAirplaneModeOn(context)
+
+    suspend fun waitForConnectionStabilization(timeoutMs: Long = 14000L): Boolean = withContext(dispatchers.io) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val start = System.currentTimeMillis()
+
+        AppLogger.i("IpHuntManager", "Stabilization Phase 1: Checking Airplane Mode...")
+        // Phase 1: Wait for Airplane Mode to be completely OFF
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            if (!isAirplaneModeOn()) break
+            delay(250)
+        }
+
+        if (isAirplaneModeOn()) {
+            AppLogger.w("IpHuntManager", "Airplane Mode is still ON. Cannot stabilize connection.")
+            return@withContext false
+        }
+
+        AppLogger.i("IpHuntManager", "Stabilization Phase 2: Airplane Mode is OFF. Waiting for mobile data & IP assignment...")
+
+        // Phase 2: Wait for cellular or network connectivity and an assigned IP address
+        var networkReady = false
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            // Safety: if airplane mode turned back on, abort
+            if (isAirplaneModeOn()) return@withContext false
+
+            val ip = getMobileDataIp()
+            val activeNet = cm?.activeNetwork
+            val caps = if (activeNet != null) cm.getNetworkCapabilities(activeNet) else null
+
+            val hasDataCapability = caps != null && (
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+            )
+
+            if (!ip.isNullOrBlank() && hasDataCapability) {
+                networkReady = true
+                AppLogger.i("IpHuntManager", "Cellular data link established! Assigned IP: $ip")
+                break
+            }
+            delay(350)
+        }
+
+        if (!networkReady) {
+            AppLogger.w("IpHuntManager", "Cellular data did not stabilize within ${timeoutMs}ms")
+            return@withContext false
+        }
+
+        // Phase 3: Crucial 2000ms settling delay for cellular baseband radio & kernel routing tables
+        AppLogger.i("IpHuntManager", "Stabilization Phase 3: Settling radio connection for 2000ms...")
+        delay(2000)
+        true
+    }
+
     suspend fun executeSingleAutoCycle(): Boolean {
         refreshAutomationCapabilities()
         return executeAutoAirplaneToggle()

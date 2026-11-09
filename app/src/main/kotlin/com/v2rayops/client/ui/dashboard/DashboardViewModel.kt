@@ -291,41 +291,62 @@ class DashboardViewModel @Inject constructor(
                     break
                 }
 
-                // 2. Disconnect any stale session
+                // 2. Safety check: NEVER attempt connection while Airplane Mode is ON!
+                if (ipHuntManager.isAirplaneModeOn()) {
+                    AppLogger.w("SmartHunt", "Airplane Mode is ON before cycle #$cycleCount! Turning it OFF first...")
+                    ipHuntManager.executeSingleAutoCycle()
+                }
+
+                // 3. Actively wait for mobile data connection to settle and stabilize
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Waiting for cellular data connection to stabilize...")
+                val isStabilized = ipHuntManager.waitForConnectionStabilization(timeoutMs = 14000L)
+                if (!isStabilized) {
+                    AppLogger.w("SmartHunt", "Cycle #$cycleCount: Cellular data failed to stabilize. Cycling Airplane Mode...")
+                    ipHuntManager.executeSingleAutoCycle()
+                    continue
+                }
+
+                // 4. Double check right before connecting: Airplane Mode MUST NOT be ON!
+                if (ipHuntManager.isAirplaneModeOn()) {
+                    AppLogger.w("SmartHunt", "Airplane Mode detected ON right before VPN connect. Halting connect attempt.")
+                    ipHuntManager.executeSingleAutoCycle()
+                    continue
+                }
+
+                val currentIp = ipHuntManager.getMobileDataIp()
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Mobile network stable (IP: $currentIp). Connecting VPN...")
+
+                // 5. Disconnect any stale session
                 if (connectionState.value.isConnected || connectionState.value.isConnecting) {
                     vpnManager.disconnect()
                     delay(300)
                 }
 
-                // 3. Initiate VPN connection (Center dial enters CONNECTING state immediately!)
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Connecting VPN with profile '${config.displayName}'...")
+                // 6. Initiate VPN connection (Center dial enters CONNECTING state immediately!)
                 vpnManager.connect(config)
 
-                // 4. Wait and verify whether the VPN is genuinely working and passing traffic
-                val isWorking = verifyVpnWorkingWithTimeout(timeoutMs = 4500L)
+                // 7. Wait and verify whether the VPN is genuinely working and passing traffic
+                val isWorking = verifyVpnWorkingWithTimeout(timeoutMs = 5000L)
 
                 if (isWorking) {
-                    AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: VPN is active and passing traffic!")
+                    AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: VPN is active and passing traffic on IP $currentIp!")
                     _isSmartHunting.value = false
                     break
                 }
 
                 if (!isActive || !_isSmartHunting.value) break
 
-                // 5. VPN not working on this cellular IP -> Disconnect
-                AppLogger.w("SmartHunt", "Cycle #$cycleCount: VPN failed to route traffic. Disconnecting...")
+                // 8. VPN not working on this cellular IP -> Disconnect
+                AppLogger.w("SmartHunt", "Cycle #$cycleCount: VPN failed to route traffic on IP $currentIp. Disconnecting...")
                 vpnManager.disconnect()
                 delay(400)
 
-                // 6. Automatically toggle Airplane Mode ON then OFF
+                // 9. Automatically toggle Airplane Mode ON then OFF to acquire fresh carrier IP
                 AppLogger.i("SmartHunt", "Cycle #$cycleCount: Auto-cycling Airplane Mode to acquire fresh IP...")
                 val toggled = ipHuntManager.executeSingleAutoCycle()
                 if (!toggled) {
-                    AppLogger.w("SmartHunt", "Auto-toggle cycle failed or was interrupted. Retrying...")
+                    AppLogger.w("SmartHunt", "Auto-toggle cycle returned false. Verifying airplane mode state...")
                 }
-
-                // 7. Wait for mobile data connection to settle
-                delay(1600)
             }
         }
     }
@@ -345,6 +366,11 @@ class DashboardViewModel @Inject constructor(
 
         // Phase 1: Wait for VPN Service + Xray core to enter Connected state
         while (System.currentTimeMillis() - start < timeoutMs) {
+            if (ipHuntManager.isAirplaneModeOn()) {
+                AppLogger.w("SmartHunt", "Airplane mode turned ON while waiting for VPN.")
+                return@withContext false
+            }
+
             val state = connectionState.value
             if (state.isConnected) {
                 isTunnelUp = true
@@ -362,12 +388,14 @@ class DashboardViewModel @Inject constructor(
         }
 
         // Phase 2: Probe actual internet data flow through the tunnel
-        delay(400) // Brief grace period for handshake packet exchange
+        delay(600) // Brief grace period for handshake packet exchange
 
-        testTrafficThroughProxy(maxWaitMs = 2500L)
+        testTrafficThroughProxy(maxWaitMs = 3000L)
     }
 
     private suspend fun testTrafficThroughProxy(maxWaitMs: Long): Boolean = withContext(dispatchers.io) {
+        if (ipHuntManager.isAirplaneModeOn()) return@withContext false
+
         // Test 1: Check if download bytes already accumulating
         val initialRx = trafficStats.value.totalDownloadBytes
         if (initialRx > 2048) {
@@ -376,25 +404,33 @@ class DashboardViewModel @Inject constructor(
         }
 
         // Test 2: Fast HTTP 204 probe through local proxy 127.0.0.1:10809
-        try {
-            val client = OkHttpClient.Builder()
-                .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809)))
-                .connectTimeout(maxWaitMs, TimeUnit.MILLISECONDS)
-                .readTimeout(maxWaitMs, TimeUnit.MILLISECONDS)
-                .build()
+        val probeUrls = listOf(
+            "http://cp.cloudflare.com/generate_204",
+            "http://connectivitycheck.gstatic.com/generate_204"
+        )
 
-            val request = Request.Builder()
-                .url("http://cp.cloudflare.com/generate_204")
-                .header("User-Agent", "V2RayOps-Client/1.0")
-                .build()
+        for (url in probeUrls) {
+            if (ipHuntManager.isAirplaneModeOn()) return@withContext false
+            try {
+                val client = OkHttpClient.Builder()
+                    .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809)))
+                    .connectTimeout(maxWaitMs, TimeUnit.MILLISECONDS)
+                    .readTimeout(maxWaitMs, TimeUnit.MILLISECONDS)
+                    .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful || response.code == 204) {
-                AppLogger.d("SmartHunt", "Proxy HTTP 204 probe returned ${response.code}. Tunnel verified!")
-                return@withContext true
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "V2RayOps-Client/1.0")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful || response.code == 204) {
+                    AppLogger.d("SmartHunt", "Proxy probe to $url returned ${response.code}. Tunnel verified!")
+                    return@withContext true
+                }
+            } catch (e: Exception) {
+                AppLogger.d("SmartHunt", "Proxy probe to $url failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            AppLogger.d("SmartHunt", "Proxy probe failed: ${e.message}")
         }
 
         // Final check: did totalDownloadBytes increase during probe?

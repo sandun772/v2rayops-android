@@ -148,24 +148,33 @@ class IpHuntAccessibilityService : AccessibilityService() {
 
         AppLogger.i("IpHuntAccessibility", "Target switch found at bounds $switchBounds. Current airplane status: ${isAirplaneModeOn(this)}")
 
-        // Step 4: Toggle Airplane Mode ON
+        // Step 4: Toggle Airplane Mode ON (only if currently OFF)
         if (!isAirplaneModeOn(this)) {
             AppLogger.d("IpHuntAccessibility", "Toggling Airplane Mode ON...")
             clickSwitch(switchNode, switchBounds)
 
-            // Verify hardware state changed to ON
+            // Wait up to 2.5s for hardware state to register ON without spamming clicks
             val onStart = System.currentTimeMillis()
-            while (!isAirplaneModeOn(this) && System.currentTimeMillis() - onStart < 1500L) {
-                delay(150)
-                clickSwitch(switchNode, switchBounds)
+            while (!isAirplaneModeOn(this) && System.currentTimeMillis() - onStart < 2500L) {
+                delay(200)
+            }
+
+            // Fallback gesture tap if action click was ignored
+            if (!isAirplaneModeOn(this) && !switchBounds.isEmpty) {
+                AppLogger.d("IpHuntAccessibility", "Retrying toggle ON via gesture tap fallback...")
+                dispatchTouchTap(switchBounds.centerX().toFloat(), switchBounds.centerY().toFloat())
+                val retryStart = System.currentTimeMillis()
+                while (!isAirplaneModeOn(this) && System.currentTimeMillis() - retryStart < 1500L) {
+                    delay(200)
+                }
             }
         }
 
         val turnedOn = isAirplaneModeOn(this)
         AppLogger.i("IpHuntAccessibility", "Airplane Mode ON confirmed: $turnedOn")
 
-        // Step 5: Hold in Airplane Mode for 1.6s so mobile network detaches from tower
-        delay(1600)
+        // Step 5: Hold in Airplane Mode for 2.0s so mobile network fully detaches from tower
+        delay(2000)
 
         // Step 6: Toggle Airplane Mode OFF
         AppLogger.d("IpHuntAccessibility", "Toggling Airplane Mode OFF...")
@@ -176,17 +185,36 @@ class IpHuntAccessibilityService : AccessibilityService() {
 
         clickSwitch(offNode, offBounds)
 
-        // Verify hardware state changed to OFF
+        // Wait up to 2.5s for hardware state to register OFF without spamming clicks
         val offStart = System.currentTimeMillis()
-        while (isAirplaneModeOn(this) && System.currentTimeMillis() - offStart < 1500L) {
-            delay(150)
-            clickSwitch(offNode, offBounds)
+        while (isAirplaneModeOn(this) && System.currentTimeMillis() - offStart < 2500L) {
+            delay(200)
+        }
+
+        // Fallback gesture tap if action click was ignored
+        if (isAirplaneModeOn(this) && !offBounds.isEmpty) {
+            AppLogger.d("IpHuntAccessibility", "Retrying toggle OFF via gesture tap fallback...")
+            dispatchTouchTap(offBounds.centerX().toFloat(), offBounds.centerY().toFloat())
+            val retryOffStart = System.currentTimeMillis()
+            while (isAirplaneModeOn(this) && System.currentTimeMillis() - retryOffStart < 2000L) {
+                delay(200)
+            }
+        }
+
+        // Emergency guarantee: If Airplane mode is STILL ON, try clickable parent
+        if (isAirplaneModeOn(this)) {
+            AppLogger.w("IpHuntAccessibility", "Emergency: Airplane mode still ON! Attempting parent click...")
+            offNode.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            val emergStart = System.currentTimeMillis()
+            while (isAirplaneModeOn(this) && System.currentTimeMillis() - emergStart < 1500L) {
+                delay(200)
+            }
         }
 
         val turnedOff = !isAirplaneModeOn(this)
         AppLogger.i("IpHuntAccessibility", "Airplane Mode OFF confirmed: $turnedOff")
 
-        delay(350)
+        delay(400)
         // Step 7: Return smoothly to V2RayOps
         bringV2RayOpsToFront()
 
@@ -331,30 +359,38 @@ class IpHuntAccessibilityService : AccessibilityService() {
         return result
     }
 
-    private fun clickSwitch(node: AccessibilityNodeInfo, bounds: Rect) {
+    private fun clickSwitch(node: AccessibilityNodeInfo, bounds: Rect): Boolean {
         // 1. Try standard Accessibility action
-        val actionSuccess = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        if (!actionSuccess && node.parent != null) {
-            node.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            return true
+        }
+        var p = node.parent
+        while (p != null) {
+            if (p.isClickable && p.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return true
+            }
+            p = p.parent
         }
 
-        // 2. Also dispatch physical touch gesture to the exact center coordinates of the switch
-        if (!bounds.isEmpty) {
-            dispatchTouchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+        // 2. Fallback: physical touch gesture if accessibility action wasn't handled
+        if (!bounds.isEmpty && bounds.centerX() > 0 && bounds.centerY() > 0) {
+            return dispatchTouchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
         }
+        return false
     }
 
-    private fun dispatchTouchTap(x: Float, y: Float) {
+    private fun dispatchTouchTap(x: Float, y: Float): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             try {
                 val path = Path().apply { moveTo(x, y) }
                 val stroke = GestureDescription.StrokeDescription(path, 0, 50)
                 val gesture = GestureDescription.Builder().addStroke(stroke).build()
-                dispatchGesture(gesture, null, null)
+                return dispatchGesture(gesture, null, null)
             } catch (e: Exception) {
                 AppLogger.w("IpHuntAccessibility", "dispatchGesture failed: ${e.message}")
             }
         }
+        return false
     }
 
     private fun bringV2RayOpsToFront() {
