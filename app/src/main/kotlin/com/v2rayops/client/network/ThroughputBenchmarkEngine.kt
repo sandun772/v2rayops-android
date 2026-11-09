@@ -77,11 +77,12 @@ class ThroughputBenchmarkEngine @Inject constructor(
         private const val TAG = "ThroughputBenchmark"
         private const val LOCAL_PROXY_PORT = 10809
 
-        // Reliable micro-chunk test endpoints (Cloudflare edge CDN / Anycast)
+        // Reliable multi-chunk test endpoints (Cloudflare edge CDN / Anycast)
+        // 10MB payload allows TCP congestion window to ramp up past slow-start on mobile networks
         private val DOWNLOAD_ENDPOINTS = listOf(
-            "https://speed.cloudflare.com/__down?bytes=1048576", // 1MB payload
-            "https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js", // ~130KB CDN
-            "https://speed.cloudflare.com/__down?bytes=524288"   // 512KB payload
+            "https://speed.cloudflare.com/__down?bytes=10485760", // 10MB payload
+            "https://speed.cloudflare.com/__down?bytes=5242880",  // 5MB fallback
+            "https://speed.cloudflare.com/__down?bytes=2097152"   // 2MB fallback
         )
 
         private val STREAMING_CHUNK_ENDPOINTS = listOf(
@@ -118,6 +119,8 @@ class ThroughputBenchmarkEngine @Inject constructor(
         val client = buildHttpClient(timeoutSec = 12)
         var totalBytesRead = 0L
         var peakSpeed = 0.0
+        var steadyStateBytes = 0L
+        var steadyStateStartMs = 0L
         val startTime = System.currentTimeMillis()
 
         var success = false
@@ -139,29 +142,46 @@ class ThroughputBenchmarkEngine @Inject constructor(
                     }
 
                     val body = response.body ?: return@use
-                    val contentLength = body.contentLength().coerceAtLeast(1048576L)
+                    val contentLength = body.contentLength().coerceAtLeast(10485760L)
                     val inputStream: InputStream = body.byteStream()
-                    val buffer = ByteArray(16384) // 16KB read buffer
+                    val buffer = ByteArray(32768) // 32KB read buffer for high throughput
                     var read: Int
 
                     while (inputStream.read(buffer).also { read = it } != -1) {
                         totalBytesRead += read
                         val elapsedMs = (System.currentTimeMillis() - callStartTime).coerceAtLeast(1)
-                        val elapsedSec = elapsedMs / 1000.0
-                        val currentMbps = if (elapsedSec > 0.05) {
-                            (totalBytesRead * 8.0) / (elapsedSec * 1_000_000.0)
-                        } else 0.0
 
-                        if (currentMbps > peakSpeed) {
-                            peakSpeed = currentMbps
+                        // Discard initial slow-start ramp-up (first 400ms) to measure true steady-state transfer rate
+                        if (elapsedMs > 400) {
+                            if (steadyStateStartMs == 0L) {
+                                steadyStateStartMs = System.currentTimeMillis()
+                                steadyStateBytes = 0L
+                            }
+                            steadyStateBytes += read
+                            val steadyElapsedSec = (System.currentTimeMillis() - steadyStateStartMs).coerceAtLeast(1) / 1000.0
+                            val steadyMbps = (steadyStateBytes * 8.0) / (steadyElapsedSec * 1_000_000.0)
+
+                            if (steadyMbps > peakSpeed) {
+                                peakSpeed = steadyMbps
+                            }
+                        } else {
+                            val elapsedSec = elapsedMs / 1000.0
+                            val currentMbps = if (elapsedSec > 0.05) (totalBytesRead * 8.0) / (elapsedSec * 1_000_000.0) else 0.0
+                            if (currentMbps > peakSpeed) peakSpeed = currentMbps
                         }
 
+                        // Cap individual download duration at 4.5 seconds to keep fine-tuning fast
+                        if (elapsedMs > 4500) {
+                            break
+                        }
+
+                        val currentDisplayMbps = if (peakSpeed > 0.0) peakSpeed else (totalBytesRead * 8.0) / ((elapsedMs / 1000.0) * 1_000_000.0)
                         val percent = (totalBytesRead.toFloat() / contentLength.toFloat()).coerceIn(0f, 1f)
                         onProgress(
                             DownloadBenchmarkProgress(
                                 bytesReceived = totalBytesRead,
                                 totalBytes = contentLength,
-                                currentSpeedMbps = currentMbps,
+                                currentSpeedMbps = currentDisplayMbps,
                                 progressPercent = percent,
                                 isRunning = true
                             )
@@ -178,7 +198,14 @@ class ThroughputBenchmarkEngine @Inject constructor(
         }
 
         val totalDurationMs = (System.currentTimeMillis() - startTime).coerceAtLeast(1)
-        val avgSpeedMbps = if (totalDurationMs > 0) {
+        val avgSpeedMbps = if (steadyStateBytes > 0 && steadyStateStartMs > 0) {
+            val steadyDurationSec = (System.currentTimeMillis() - steadyStateStartMs) / 1000.0
+            if (steadyDurationSec > 0.1) {
+                (steadyStateBytes * 8.0) / (steadyDurationSec * 1_000_000.0)
+            } else {
+                (totalBytesRead * 8.0) / ((totalDurationMs / 1000.0) * 1_000_000.0)
+            }
+        } else if (totalDurationMs > 0) {
             (totalBytesRead * 8.0) / ((totalDurationMs / 1000.0) * 1_000_000.0)
         } else 0.0
 

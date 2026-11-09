@@ -182,4 +182,71 @@ class RouteScannerEngineTest {
         assertTrue(updatedPort.verifiedPorts.contains(80))
         assertTrue(updatedPort.verifiedPorts.contains(8443))
     }
+
+    @Test
+    fun findBestSpeedCandidate_selectsLowestLatencyRouteRegardlessOfStrategy() {
+        val cand1 = RouteScannerEngine.DEFAULT_CANDIDATES[0].copy(
+            domain = "teams.microsoft.com",
+            strategy = RouteStrategy.ADDR_SNI,
+            status = SniStatus.WS_READY,
+            avgLatencyMs = 45L,
+            stabilityScore = 90
+        )
+        val cand2 = RouteScannerEngine.DEFAULT_CANDIDATES[1].copy(
+            domain = "zoom.us",
+            strategy = RouteStrategy.STANDARD_SNI,
+            status = SniStatus.WS_READY,
+            avgLatencyMs = 220L,
+            stabilityScore = 95
+        )
+
+        val winner = RouteScannerEngine.findBestSpeedCandidate(listOf(cand1, cand2))
+        assertEquals("teams.microsoft.com", winner?.domain)
+        assertEquals(45L, winner?.avgLatencyMs)
+        assertEquals(RouteStrategy.ADDR_SNI, winner?.strategy)
+    }
+
+    @Test
+    fun findBestStabilityCandidate_selectsZeroLossAndLowestJitter() {
+        val jittery = RouteScannerEngine.DEFAULT_CANDIDATES[0].copy(
+            domain = "fast-edge.com",
+            status = SniStatus.WS_READY,
+            avgLatencyMs = 50L,
+            stabilityScore = 80,
+            packetLossPercent = 10,
+            jitterMs = 40L
+        )
+        val rockSolid = RouteScannerEngine.DEFAULT_CANDIDATES[1].copy(
+            domain = "rock-solid.com",
+            status = SniStatus.WS_READY,
+            avgLatencyMs = 120L,
+            stabilityScore = 99,
+            packetLossPercent = 0,
+            jitterMs = 2L
+        )
+
+        val winner = RouteScannerEngine.findBestStabilityCandidate(listOf(jittery, rockSolid))
+        assertEquals("rock-solid.com", winner?.domain)
+        assertEquals(99, winner?.stabilityScore)
+        assertEquals(0, winner?.packetLossPercent)
+    }
+
+    @Test
+    fun findBestBalancedCandidate_optimizesCompositeScore() {
+        val ultraFastUnstable = RouteScannerEngine.DEFAULT_CANDIDATES[0].copy(
+            domain = "fast-fragile.com",
+            status = SniStatus.WS_READY,
+            avgLatencyMs = 30L,
+            stabilityScore = 40
+        )
+        val optimalBalanced = RouteScannerEngine.DEFAULT_CANDIDATES[1].copy(
+            domain = "aka.ms",
+            status = SniStatus.WS_READY,
+            avgLatencyMs = 70L,
+            stabilityScore = 96
+        )
+
+        val winner = RouteScannerEngine.findBestBalancedCandidate(listOf(ultraFastUnstable, optimalBalanced))
+        assertEquals("aka.ms", winner?.domain)
+    }
 }

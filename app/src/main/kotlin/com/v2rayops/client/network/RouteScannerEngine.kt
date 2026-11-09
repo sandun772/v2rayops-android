@@ -320,6 +320,45 @@ class RouteScannerEngine @Inject constructor(
                 )
             }
         }
+
+        fun findBestSpeedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
+            val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+            if (passing.isEmpty()) return candidates.firstOrNull()
+
+            // Prioritize WS_READY passing candidates with lowest average latency (whether ADDR_SNI edge or STANDARD_SNI)
+            val wsPassing = passing.filter { it.status == SniStatus.WS_READY }
+            if (wsPassing.isNotEmpty()) {
+                return wsPassing.minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
+            }
+            return passing.minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
+        }
+
+        fun findBestStabilityCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
+            val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+            if (passing.isEmpty()) return candidates.firstOrNull()
+
+            // Prioritize candidates with 100% pass rate (0% packet loss), lowest jitter, and highest stability score
+            return passing.sortedWith(
+                compareByDescending<SniRouteCandidate> { it.status == SniStatus.WS_READY }
+                    .thenByDescending { it.stabilityScore }
+                    .thenBy { it.packetLossPercent }
+                    .thenBy { it.jitterMs }
+                    .thenBy { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: Long.MAX_VALUE }
+            ).firstOrNull()
+        }
+
+        fun findBestBalancedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
+            val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+            if (passing.isEmpty()) return candidates.firstOrNull()
+            fun score(c: SniRouteCandidate): Double {
+                val latClamped = c.avgLatencyMs.coerceIn(10L, 500L)
+                val latScore = (500L - latClamped).toDouble() / 500.0 * 40.0
+                val stabScore = c.stabilityScore.toDouble() * 0.6
+                val wsBonus = if (c.status == SniStatus.WS_READY) 15.0 else 0.0
+                return stabScore + latScore + wsBonus
+            }
+            return passing.maxByOrNull { score(it) }
+        }
     }
 
     /**
@@ -721,45 +760,14 @@ class RouteScannerEngine @Inject constructor(
      * Triple-Mode Presets Candidate Evaluators:
      * Discovers 3 distinct best candidates for SPEED, STABILITY, and BALANCED modes.
      */
-    fun findBestSpeedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
-        val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
-        if (passing.isEmpty()) return candidates.firstOrNull()
-        return passing
-            .filter { it.strategy == RouteStrategy.STANDARD_SNI && it.stabilityScore >= 50 }
-            .minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
-            ?: passing.minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
-    }
+    fun findBestSpeedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? =
+        Companion.findBestSpeedCandidate(candidates)
 
-    fun findBestStabilityCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
-        val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
-        if (passing.isEmpty()) return candidates.firstOrNull()
-        return passing
-            .filter { it.strategy == RouteStrategy.STANDARD_SNI }
-            .sortedWith(
-                compareByDescending<SniRouteCandidate> { it.stabilityScore }
-                    .thenBy { it.packetLossPercent }
-                    .thenBy { it.jitterMs }
-                    .thenBy { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: Long.MAX_VALUE }
-            ).firstOrNull()
-            ?: passing.sortedWith(
-                compareByDescending<SniRouteCandidate> { it.stabilityScore }
-                    .thenBy { it.packetLossPercent }
-                    .thenBy { it.jitterMs }
-            ).firstOrNull()
-    }
+    fun findBestStabilityCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? =
+        Companion.findBestStabilityCandidate(candidates)
 
-    fun findBestBalancedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
-        val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
-        if (passing.isEmpty()) return candidates.firstOrNull()
-        fun score(c: SniRouteCandidate): Double {
-            val latClamped = c.avgLatencyMs.coerceIn(10L, 500L)
-            val latScore = (500L - latClamped).toDouble() / 500.0 * 40.0
-            val stabScore = c.stabilityScore.toDouble() * 0.6
-            val strategyBonus = if (c.strategy == RouteStrategy.STANDARD_SNI) 10.0 else 0.0
-            return stabScore + latScore + strategyBonus
-        }
-        return passing.maxByOrNull { score(it) }
-    }
+    fun findBestBalancedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? =
+        Companion.findBestBalancedCandidate(candidates)
 
     fun buildTunedPresetConfig(
         base: VpnConfig,
