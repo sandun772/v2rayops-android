@@ -124,6 +124,10 @@ class VpnManager @Inject constructor(
         connect(config)
     }
 
+    fun measureDelay(url: String = "https://www.google.com/generate_204"): Long {
+        return xrayEngine.measureDelay(url)
+    }
+
     fun disconnect() {
         scope.launch {
             AppLogger.i(TAG, "Disconnect requested")

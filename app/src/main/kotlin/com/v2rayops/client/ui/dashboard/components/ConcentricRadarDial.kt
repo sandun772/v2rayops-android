@@ -69,9 +69,13 @@ fun ConcentricRadarDial(
 ) {
     val isAirplanePhase = isCyclingAirplane ||
             smartHuntProgress.stage == SmartHuntStage.WAITING_AIRPLANE_ON ||
-            smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON
+            smartHuntProgress.stage == SmartHuntStage.AIRPLANE_ON ||
+            smartHuntProgress.stage == SmartHuntStage.DEAD_IP_RETRY ||
+            smartHuntProgress.stage == SmartHuntStage.IP_MISMATCH
 
-    val isStabilizingPhase = smartHuntProgress.stage == SmartHuntStage.STABILIZING_NETWORK
+    val isAcquiringPhase = smartHuntProgress.stage == SmartHuntStage.ACQUIRING_IP ||
+            smartHuntProgress.stage == SmartHuntStage.VERIFYING_TRAFFIC
+    val isStabilizingPhase = isAcquiringPhase
 
     val isConnected = connectionState.isConnected && !smartHuntProgress.isActive && !isSmartHunting
     val isConnecting = smartHuntProgress.isActive || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
@@ -98,7 +102,7 @@ fun ConcentricRadarDial(
     // Smoothly animated transition between states
     val targetBorder = when {
         isAirplanePhase -> airplaneBorder
-        isStabilizingPhase -> stabilizingBorder
+        isAcquiringPhase -> stabilizingBorder
         isConnected -> connectedBorder
         isConnecting -> connectingBorder
         else -> disconnectedBorder
@@ -111,7 +115,7 @@ fun ConcentricRadarDial(
 
     val targetIcon = when {
         isAirplanePhase -> airplaneIcon
-        isStabilizingPhase -> stabilizingIcon
+        isAcquiringPhase -> stabilizingIcon
         isConnected -> connectedIcon
         isConnecting -> connectingIcon
         else -> disconnectedIcon
@@ -350,7 +354,7 @@ fun ConcentricRadarDial(
                                 val b = (0x85 * (1 - t) + 0x0B * t) / 255f
                                 Color(r, g, b, 1f)
                             }
-                            isStabilizingPhase -> {
+                            isAcquiringPhase -> {
                                 val t = normalizedRing
                                 val r = (0x06 * (1 - t) + 0x10 * t) / 255f
                                 val g = (0xB6 * (1 - t) + 0xB9 * t) / 255f

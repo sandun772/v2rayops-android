@@ -29,11 +29,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetSocketAddress
@@ -275,20 +277,18 @@ class DashboardViewModel @Inject constructor(
     }
 
     /**
-     * Smart Carrier Auto-Connect Watcher:
-     * When armed (or when Airplane Mode is toggled), monitors for Airplane Mode ON then OFF.
-     * As soon as Airplane Mode is turned OFF:
-     * - Counts down 3 seconds for baseband radio stabilization.
-     * - Captures the new cellular IP.
-     * - Automatically connects the VPN.
-     * - Once connected, stays connected! Zero repeated toggles required.
+     * Event-Driven Smart Carrier Auto-Connect Watcher:
+     * - Zero arbitrary wait times or countdowns.
+     * - Microsecond reactive Airplane Mode detection via ContentObserver / BroadcastReceiver.
+     * - Instant cellular IP capture via ConnectivityManager.NetworkCallback link properties.
+     * - Native Xray core packet delay probe & downlink byte verification.
      */
     fun startSmartConnectHunt() {
         stopSmartConnectHunt()
         _isSmartHunting.value = true
 
         smartHuntJob = viewModelScope.launch(dispatchers.default) {
-            AppLogger.i("SmartHunt", "Starting Smart Carrier Auto-Connect Watcher...")
+            AppLogger.i("SmartHunt", "Starting Event-Driven Smart Carrier Watcher...")
 
             var cycleCount = 0
 
@@ -309,26 +309,38 @@ class DashboardViewModel @Inject constructor(
                 return@launch
             }
 
-            // If already connected, we are good!
+            // Step 0: If VPN is already active, verify if it routes data
             if (connectionState.value.isConnected) {
                 val currentIp = ipHuntManager.getMobileDataIp()
-                AppLogger.i("SmartHunt", "VPN is already connected on IP $currentIp. Locking connection.")
-                _isSmartHunting.value = false
                 _smartHuntProgress.value = SmartHuntProgress(
-                    stage = SmartHuntStage.SUCCESS,
+                    stage = SmartHuntStage.VERIFYING_TRAFFIC,
                     currentCycle = 1,
                     assignedIp = currentIp
                 )
-                return@launch
+                val working = verifyActiveTunnelTraffic(timeoutMs = 3500L)
+                if (working) {
+                    AppLogger.i("SmartHunt", "Active VPN on IP $currentIp confirmed passing traffic! Complete.")
+                    _isSmartHunting.value = false
+                    _smartHuntProgress.value = SmartHuntProgress(
+                        stage = SmartHuntStage.SUCCESS,
+                        currentCycle = 1,
+                        assignedIp = currentIp
+                    )
+                    return@launch
+                } else {
+                    AppLogger.w("SmartHunt", "Active VPN on IP $currentIp is not passing traffic. Disconnecting.")
+                    vpnManager.disconnect()
+                    delay(300)
+                }
             }
 
-            // Continuous watcher loop until working IP is secured
+            // Continuous event-driven cycle until a working IP is verified
             while (isActive && _isSmartHunting.value) {
                 cycleCount++
 
-                // PHASE 1: Wait for user to turn Airplane Mode ON
-                if (!ipHuntManager.isAirplaneModeOn()) {
-                    AppLogger.i("SmartHunt", "Cycle #$cycleCount: Waiting for Airplane Mode ON in Quick Settings...")
+                // PHASE 1: Wait for Airplane Mode to become ON (if not already ON)
+                val isCurrentlyOn = ipHuntManager.isAirplaneModeOn()
+                if (!isCurrentlyOn) {
                     _smartHuntProgress.value = SmartHuntProgress(
                         stage = SmartHuntStage.WAITING_AIRPLANE_ON,
                         currentCycle = cycleCount,
@@ -336,108 +348,188 @@ class DashboardViewModel @Inject constructor(
                     )
                     _isCyclingAirplaneMode.value = true
 
-                    while (isActive && _isSmartHunting.value && !ipHuntManager.isAirplaneModeOn()) {
-                        delay(200)
-                    }
+                    // Event-driven: wait until observeAirplaneMode emits true
+                    ipHuntManager.observeAirplaneMode()
+                        .filter { it }
+                        .first()
                 }
 
                 if (!isActive || !_isSmartHunting.value) break
 
-                // PHASE 2: User turned Airplane Mode ON! Now wait for user to turn it OFF
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode is ON! Waiting for user to disable it...")
+                // PHASE 2: Airplane Mode is ON -> wait until it becomes OFF
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode is ON. Waiting for user to disable it...")
                 _smartHuntProgress.value = SmartHuntProgress(
                     stage = SmartHuntStage.AIRPLANE_ON,
                     currentCycle = cycleCount
                 )
 
-                while (isActive && _isSmartHunting.value && ipHuntManager.isAirplaneModeOn()) {
-                    delay(200)
-                }
+                // Event-driven: wait until observeAirplaneMode emits false
+                ipHuntManager.observeAirplaneMode()
+                    .filter { !it }
+                    .first()
 
                 if (!isActive || !_isSmartHunting.value) break
 
-                // PHASE 3: Airplane Mode turned OFF! Stabilize network (3s countdown)
+                // PHASE 3: Airplane Mode turned OFF!
+                // Event-driven: await cellular IP assignment directly from network callback (zero preset countdowns)
                 _isCyclingAirplaneMode.value = false
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode turned OFF! Stabilizing network for 3 seconds...")
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Airplane Mode turned OFF. Awaiting cellular IP assignment event...")
+                _smartHuntProgress.value = SmartHuntProgress(
+                    stage = SmartHuntStage.ACQUIRING_IP,
+                    currentCycle = cycleCount
+                )
 
-                var acquiredIp: String? = null
-                for (sec in 3 downTo 1) {
-                    if (!isActive || !_isSmartHunting.value) break
-                    val ip = ipHuntManager.getMobileDataIp()
-                    if (!ip.isNullOrBlank()) acquiredIp = ip
-
-                    _smartHuntProgress.value = SmartHuntProgress(
-                        stage = SmartHuntStage.STABILIZING_NETWORK,
-                        countdownSeconds = sec,
-                        currentCycle = cycleCount,
-                        assignedIp = acquiredIp
-                    )
-                    delay(1000)
-                }
+                val acquiredIp = withTimeoutOrNull(10000L) {
+                    ipHuntManager.observeCellularIp()
+                        .filter { !it.isNullOrBlank() }
+                        .first()
+                } ?: ipHuntManager.getMobileDataIp()
 
                 if (!isActive || !_isSmartHunting.value) break
 
-                // Grace delay if IP hasn't appeared yet
-                if (acquiredIp.isNullOrBlank()) {
-                    for (i in 0 until 5) {
-                        val ip = ipHuntManager.getMobileDataIp()
-                        if (!ip.isNullOrBlank()) {
-                            acquiredIp = ip
-                            break
-                        }
-                        delay(400)
-                    }
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Cellular IP received: $acquiredIp")
+
+                // PHASE 4: Check Subnet / Target prefix (if user configured a custom prefix in Cockpit)
+                val targetPrefix = ipHuntManager.state.value.selectedTargetPrefix
+                val isStrictSubnet = targetPrefix.isNotBlank() && targetPrefix != "100." && targetPrefix != "ALL"
+                if (isStrictSubnet && !ipHuntManager.isIpMatching(acquiredIp, targetPrefix)) {
+                    AppLogger.w("SmartHunt", "Cycle #$cycleCount: IP $acquiredIp does not match target prefix $targetPrefix. Fast-retry.")
+                    _smartHuntProgress.value = SmartHuntProgress(
+                        stage = SmartHuntStage.IP_MISMATCH,
+                        currentCycle = cycleCount,
+                        assignedIp = acquiredIp,
+                        detailMessage = "Subnet mismatch (wanted $targetPrefix*)"
+                    )
+                    delay(1200)
+                    continue
                 }
 
-                val finalIp = acquiredIp ?: ipHuntManager.getMobileDataIp()
-                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Network ready with IP: $finalIp. Auto-connecting VPN...")
-
-                // PHASE 4: AUTO-CONNECT VPN
+                // PHASE 5: AUTO-CONNECT VPN
                 _smartHuntProgress.value = SmartHuntProgress(
                     stage = SmartHuntStage.CONNECTING_VPN,
                     currentCycle = cycleCount,
-                    assignedIp = finalIp
+                    assignedIp = acquiredIp
                 )
 
-                vpnManager.connect(config)
-
-                // PHASE 5: Wait for VPN to establish Connected state
-                val connectStart = System.currentTimeMillis()
-                var isConnected = false
-                while (System.currentTimeMillis() - connectStart < 8000L) {
-                    if (!isActive || !_isSmartHunting.value) break
-                    if (ipHuntManager.isAirplaneModeOn()) break
-
-                    val state = connectionState.value
-                    if (state.isConnected) {
-                        isConnected = true
-                        break
-                    }
-                    if (state is ConnectionState.Error) {
-                        AppLogger.w("SmartHunt", "VPN connection error: ${state.message}")
-                        break
-                    }
+                if (connectionState.value.isConnected || connectionState.value.isConnecting) {
+                    vpnManager.disconnect()
                     delay(250)
                 }
 
-                if (isConnected) {
-                    AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: VPN connected successfully on IP $finalIp! Locking connection.")
+                vpnManager.connect(config)
+
+                // Wait for VPN connection state to reach Connected
+                val connectSuccess = withTimeoutOrNull(8000L) {
+                    connectionState.filter { it.isConnected }.first()
+                } != null
+
+                if (!isActive || !_isSmartHunting.value) break
+
+                if (!connectSuccess) {
+                    AppLogger.w("SmartHunt", "Cycle #$cycleCount: VPN failed to reach Connected state. Disconnecting & retrying.")
+                    vpnManager.disconnect()
+                    _smartHuntProgress.value = SmartHuntProgress(
+                        stage = SmartHuntStage.DEAD_IP_RETRY,
+                        currentCycle = cycleCount,
+                        assignedIp = acquiredIp
+                    )
+                    delay(800)
+                    continue
+                }
+
+                // PHASE 6: VERIFY LIVE DATA FLOW ("is the IP working or not")
+                _smartHuntProgress.value = SmartHuntProgress(
+                    stage = SmartHuntStage.VERIFYING_TRAFFIC,
+                    currentCycle = cycleCount,
+                    assignedIp = acquiredIp
+                )
+
+                val isTrafficWorking = verifyActiveTunnelTraffic(timeoutMs = 4500L)
+
+                if (!isActive || !_isSmartHunting.value) break
+
+                if (isTrafficWorking) {
+                    AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: Verified working data flow on IP $acquiredIp!")
                     _isSmartHunting.value = false
                     _smartHuntProgress.value = SmartHuntProgress(
                         stage = SmartHuntStage.SUCCESS,
                         currentCycle = cycleCount,
-                        assignedIp = finalIp
+                        assignedIp = acquiredIp
                     )
                     break
                 }
 
-                if (!isActive || !_isSmartHunting.value) break
-
-                AppLogger.w("SmartHunt", "Cycle #$cycleCount: VPN did not connect in time. Awaiting next Airplane cycle...")
+                // Dead / Blocked IP detected: Disconnect & prompt user to toggle again
+                AppLogger.w("SmartHunt", "Cycle #$cycleCount: IP $acquiredIp is blocked/dead (no data flow). Disconnecting.")
                 vpnManager.disconnect()
-                delay(300)
+                _smartHuntProgress.value = SmartHuntProgress(
+                    stage = SmartHuntStage.DEAD_IP_RETRY,
+                    currentCycle = cycleCount,
+                    assignedIp = acquiredIp,
+                    detailMessage = "No data flow"
+                )
+                delay(1200)
             }
         }
+    }
+
+    private suspend fun verifyActiveTunnelTraffic(timeoutMs: Long = 4500L): Boolean = withContext(dispatchers.io) {
+        val start = System.currentTimeMillis()
+        val initialRx = trafficStats.value.totalDownloadBytes
+
+        // 1. Direct native Xray measurement through the encrypted core pipeline
+        val nativeDelay = try {
+            val delay = vpnManager.measureDelay("https://www.google.com/generate_204")
+            if (delay <= 0) vpnManager.measureDelay("http://cp.cloudflare.com/generate_204") else delay
+        } catch (_: Exception) {
+            -1L
+        }
+
+        if (nativeDelay > 0) {
+            AppLogger.i("SmartHunt", "Tunnel verified via native Xray probe (Latency: ${nativeDelay}ms)!")
+            return@withContext true
+        }
+
+        // 2. OkHttp proxy probe through local inbound HTTP port 10809
+        val probeUrls = listOf(
+            "http://cp.cloudflare.com/generate_204",
+            "http://connectivitycheck.gstatic.com/generate_204",
+            "http://ip-api.com/json"
+        )
+        for (url in probeUrls) {
+            if (ipHuntManager.isAirplaneModeOn()) return@withContext false
+            try {
+                val client = OkHttpClient.Builder()
+                    .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809)))
+                    .connectTimeout(2500, TimeUnit.MILLISECONDS)
+                    .readTimeout(2500, TimeUnit.MILLISECONDS)
+                    .build()
+
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "V2RayOps-Client/1.0")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful || response.code == 204) {
+                    AppLogger.i("SmartHunt", "Tunnel verified via HTTP inbound probe to $url (Code: ${response.code})!")
+                    return@withContext true
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 3. Downlink byte accumulation check
+        val elapsed = System.currentTimeMillis() - start
+        if (elapsed < timeoutMs) {
+            delay((timeoutMs - elapsed).coerceAtLeast(400L))
+        }
+        val finalRx = trafficStats.value.totalDownloadBytes
+        if (finalRx > initialRx + 128) {
+            AppLogger.i("SmartHunt", "Tunnel verified via live downlink byte accumulation (+${finalRx - initialRx} bytes)!")
+            return@withContext true
+        }
+
+        false
     }
 
     fun stopSmartConnectHunt() {

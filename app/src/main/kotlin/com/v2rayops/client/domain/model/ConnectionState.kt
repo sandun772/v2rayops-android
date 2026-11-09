@@ -33,16 +33,20 @@ enum class SmartHuntStage {
     CHECKING_VPN,
     WAITING_AIRPLANE_ON,
     AIRPLANE_ON,
-    STABILIZING_NETWORK,
+    ACQUIRING_IP,
     CONNECTING_VPN,
+    VERIFYING_TRAFFIC,
+    DEAD_IP_RETRY,
+    IP_MISMATCH,
     SUCCESS
 }
 
 data class SmartHuntProgress(
     val stage: SmartHuntStage = SmartHuntStage.IDLE,
-    val countdownSeconds: Int = 0,
     val currentCycle: Int = 0,
-    val assignedIp: String? = null
+    val assignedIp: String? = null,
+    val detailMessage: String? = null,
+    val countdownSeconds: Int = 0
 ) {
     val isActive: Boolean get() = stage != SmartHuntStage.IDLE && stage != SmartHuntStage.SUCCESS
 }

@@ -48,23 +48,41 @@ fun StatusPill(
             Color(0xFFF59E0B),
             "AIRPLANE ON • TURN OFF"
         )
-        smartHuntProgress.stage == SmartHuntStage.STABILIZING_NETWORK -> Quadruple(
+        smartHuntProgress.stage == SmartHuntStage.ACQUIRING_IP -> Quadruple(
             Color(0xFF041B1C),
             Color(0xFF0B4648),
             Color(0xFF06B6D4),
-            "STABILIZING • ${smartHuntProgress.countdownSeconds}s"
+            "ACQUIRING IP..."
+        )
+        smartHuntProgress.stage == SmartHuntStage.CONNECTING_VPN -> Quadruple(
+            Color(0xFF160B24),
+            Color(0xFF3B1D5E),
+            Color(0xFFA855F7),
+            if (!smartHuntProgress.assignedIp.isNullOrBlank()) "CONNECTING • ${smartHuntProgress.assignedIp}" else "AUTO-CONNECTING"
+        )
+        smartHuntProgress.stage == SmartHuntStage.VERIFYING_TRAFFIC -> Quadruple(
+            Color(0xFF1E1405),
+            Color(0xFF4A320A),
+            Color(0xFFF59E0B),
+            "TESTING DATA FLOW..."
+        )
+        smartHuntProgress.stage == SmartHuntStage.DEAD_IP_RETRY -> Quadruple(
+            Color(0xFF240A12),
+            Color(0xFF5E1B2C),
+            Color(0xFFFB7185),
+            "NO DATA FLOW • TOGGLE ON"
+        )
+        smartHuntProgress.stage == SmartHuntStage.IP_MISMATCH -> Quadruple(
+            Color(0xFF1E1405),
+            Color(0xFF4A320A),
+            Color(0xFFF59E0B),
+            "MISMATCH • TOGGLE ON"
         )
         smartHuntProgress.stage == SmartHuntStage.CHECKING_VPN -> Quadruple(
             Color(0xFF1E1405),
             Color(0xFF4A320A),
             Color(0xFFF59E0B),
             "CHECKING TRAFFIC"
-        )
-        smartHuntProgress.stage == SmartHuntStage.CONNECTING_VPN -> Quadruple(
-            Color(0xFF1E1405),
-            Color(0xFF4A320A),
-            Color(0xFFF59E0B),
-            "AUTO-CONNECTING"
         )
         isSmartHunting -> Quadruple(
             Color(0xFF1E1405),

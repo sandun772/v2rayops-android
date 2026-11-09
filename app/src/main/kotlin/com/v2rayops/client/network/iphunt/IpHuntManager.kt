@@ -1,9 +1,12 @@
 package com.v2rayops.client.network.iphunt
 
 import android.app.role.RoleManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.database.ContentObserver
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
@@ -11,6 +14,8 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import com.v2rayops.client.core.dispatchers.AppDispatchers
 import com.v2rayops.client.core.logger.AppLogger
@@ -20,10 +25,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -243,6 +252,114 @@ class IpHuntManager @Inject constructor(
     }
 
     fun isAirplaneModeOn(): Boolean = IpHuntAccessibilityService.isAirplaneModeOn(context)
+
+    /**
+     * Emits the live hardware Airplane Mode state instantaneously without polling.
+     * Uses ContentObserver on Settings.Global and Intent.ACTION_AIRPLANE_MODE_CHANGED receiver.
+     */
+    fun observeAirplaneMode(): Flow<Boolean> = callbackFlow {
+        fun currentStatus(): Boolean = isAirplaneModeOn()
+
+        trySend(currentStatus())
+
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                trySend(currentStatus())
+            }
+        }
+
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                trySend(currentStatus())
+            }
+        }
+
+        try {
+            context.contentResolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.AIRPLANE_MODE_ON),
+                false,
+                observer
+            )
+        } catch (e: Exception) {
+            AppLogger.w("IpHuntManager", "Could not register Airplane Mode ContentObserver: ${e.message}")
+        }
+
+        try {
+            val filter = IntentFilter(Intent.ACTION_AIRPLANE_MODE_CHANGED)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(receiver, filter)
+            }
+        } catch (e: Exception) {
+            AppLogger.w("IpHuntManager", "Could not register Airplane Mode BroadcastReceiver: ${e.message}")
+        }
+
+        awaitClose {
+            try {
+                context.contentResolver.unregisterContentObserver(observer)
+            } catch (_: Exception) {}
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (_: Exception) {}
+        }
+    }.distinctUntilChanged()
+
+    /**
+     * Emits the cellular IPv4 address instantaneously via NetworkCallback as soon as
+     * DHCP/baseband registers on cell towers (zero arbitrary wait times).
+     */
+    fun observeCellularIp(): Flow<String?> = callbackFlow {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (cm == null) {
+            trySend(getMobileDataIp())
+            close()
+            return@callbackFlow
+        }
+
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val ip = getMobileDataIp()
+                if (!ip.isNullOrBlank()) {
+                    trySend(ip)
+                }
+            }
+
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                val ipv4 = linkProperties.linkAddresses
+                    .map { it.address }
+                    .filterIsInstance<Inet4Address>()
+                    .firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
+                    ?.hostAddress ?: getMobileDataIp()
+
+                if (!ipv4.isNullOrBlank()) {
+                    trySend(ipv4)
+                }
+            }
+
+            override fun onLost(network: Network) {
+                trySend(null)
+            }
+        }
+
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .build()
+
+        try {
+            cm.registerNetworkCallback(request, callback)
+            trySend(getMobileDataIp())
+        } catch (e: Exception) {
+            AppLogger.w("IpHuntManager", "Could not register NetworkCallback: ${e.message}")
+            trySend(getMobileDataIp())
+        }
+
+        awaitClose {
+            try {
+                cm.unregisterNetworkCallback(callback)
+            } catch (_: Exception) {}
+        }
+    }.distinctUntilChanged()
 
     suspend fun waitForConnectionStabilization(timeoutMs: Long = 14000L): Boolean = withContext(dispatchers.io) {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
