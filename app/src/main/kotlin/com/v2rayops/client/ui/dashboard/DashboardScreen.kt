@@ -79,6 +79,7 @@ fun DashboardScreen(
     val context = LocalContext.current
     val connectionState by viewModel.connectionState.collectAsState()
     val trafficStats by viewModel.trafficStats.collectAsState()
+    val isNetworkWorkingFine by viewModel.isNetworkWorkingFine.collectAsState()
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
     val livePingMs by viewModel.livePingMs.collectAsState()
@@ -363,6 +364,7 @@ fun DashboardScreen(
                     isSmartHunting = isSmartHunting,
                     isCyclingAirplane = isCyclingAirplane,
                     smartHuntProgress = smartHuntProgress,
+                    isNetworkWorkingFine = isNetworkWorkingFine,
                     onClick = handleConnectClick,
                     onLongClick = handleStartSmartHunt
                 )

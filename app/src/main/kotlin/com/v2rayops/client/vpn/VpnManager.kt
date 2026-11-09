@@ -12,6 +12,9 @@ import com.v2rayops.client.xray.XrayEngine
 import com.v2rayops.client.xray.XrayState
 import com.v2rayops.client.network.AdaptiveQoSEngine
 import com.v2rayops.client.network.QoSStatus
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +25,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -46,10 +51,15 @@ class VpnManager @Inject constructor(
     private val _trafficStats = MutableStateFlow(TrafficStats())
     val trafficStats: StateFlow<TrafficStats> = _trafficStats.asStateFlow()
 
+    private val _isNetworkWorkingFine = MutableStateFlow(true)
+    val isNetworkWorkingFine: StateFlow<Boolean> = _isNetworkWorkingFine.asStateFlow()
+
     val qosStatus: StateFlow<QoSStatus> = adaptiveQoSEngine.qosStatus
 
     private var currentConfig: VpnConfig? = null
     private var statsJob: Job? = null
+    private var healthMonitorJob: Job? = null
+    private var savedConnectedSinceMs: Long = 0L
     private var isConnectInProgress = false
 
     init {
@@ -66,6 +76,7 @@ class VpnManager @Inject constructor(
                             connectedSinceMs = now
                         )
                         startTrafficPolling()
+                        startHealthMonitoring()
                     }
                     is XrayState.Starting -> {
                         val cfg = currentConfig
@@ -75,16 +86,19 @@ class VpnManager @Inject constructor(
                     }
                     is XrayState.Stopped -> {
                         stopTrafficPolling()
+                        stopHealthMonitoring()
                         if (_connectionState.value !is ConnectionState.Disconnected) {
                             _connectionState.value = ConnectionState.Disconnected
                         }
                     }
                     is XrayState.Error -> {
                         stopTrafficPolling()
+                        stopHealthMonitoring()
                         _connectionState.value = ConnectionState.Error(xrayState.error)
                     }
                     is XrayState.BinaryPending -> {
                         stopTrafficPolling()
+                        stopHealthMonitoring()
                         _connectionState.value = ConnectionState.Unavailable(xrayState.message)
                     }
                 }
@@ -124,6 +138,11 @@ class VpnManager @Inject constructor(
         connect(config)
     }
 
+    fun reconnect() {
+        val cfg = currentConfig ?: return
+        connect(cfg)
+    }
+
     fun measureDelay(url: String = "https://www.google.com/generate_204"): Long {
         return xrayEngine.measureDelay(url)
     }
@@ -134,6 +153,7 @@ class VpnManager @Inject constructor(
             _connectionState.value = ConnectionState.Disconnecting
             isConnectInProgress = false
             stopTrafficPolling()
+            stopHealthMonitoring()
             adaptiveQoSEngine.reset()
             vpnController.stopService()
             xrayEngine.stop()
@@ -163,5 +183,123 @@ class VpnManager @Inject constructor(
         statsJob?.cancel()
         statsJob = null
         adaptiveQoSEngine.reset()
+    }
+
+    /**
+     * Active Tunnel Health & Timeout Monitor:
+     * - Continuously verifies live data flow through the tunnel.
+     * - If traffic is active (> 256 bytes delta), connection is confirmed healthy.
+     * - If idle, sends non-blocking lightweight HTTP 204 probes via local proxy (127.0.0.1:10809).
+     * - When all requests time out (2 consecutive timeouts): transitions state to Connecting.
+     * - When requests succeed again: automatically restores state to Connected.
+     */
+    private fun startHealthMonitoring() {
+        healthMonitorJob?.cancel()
+        healthMonitorJob = scope.launch(dispatchers.io) {
+            // Allow tunnel socket & route tables 2.5s to establish handshakes
+            delay(2500L)
+
+            val probeUrls = listOf(
+                "http://cp.cloudflare.com/generate_204",
+                "http://www.google.com/generate_204"
+            )
+            var consecutiveTimeouts = 0
+            var lastRx = _trafficStats.value.totalDownloadBytes
+
+            while (isActive) {
+                val currentRx = _trafficStats.value.totalDownloadBytes
+                val rxDelta = currentRx - lastRx
+                lastRx = currentRx
+
+                // If real user traffic is accumulating (> 256 bytes), networking is working fine
+                if (rxDelta > 256) {
+                    consecutiveTimeouts = 0
+                    _isNetworkWorkingFine.value = true
+                    restoreConnectedIfDegraded()
+                    delay(4000L)
+                    continue
+                }
+
+                // Traffic is idle: run active probe through local proxy inbound 127.0.0.1:10809
+                val isOk = testProxyProbe(probeUrls)
+
+                if (isOk) {
+                    consecutiveTimeouts = 0
+                    _isNetworkWorkingFine.value = true
+                    restoreConnectedIfDegraded()
+                    delay(5000L)
+                } else {
+                    consecutiveTimeouts++
+                    AppLogger.w(TAG, "Active tunnel request timed out (count=$consecutiveTimeouts)")
+
+                    if (consecutiveTimeouts >= 2) {
+                        _isNetworkWorkingFine.value = false
+                        val state = _connectionState.value
+                        if (state is ConnectionState.Connected) {
+                            savedConnectedSinceMs = state.connectedSinceMs
+                            AppLogger.w(TAG, "All requests timed out. Transitioning state to Connecting.")
+                            _connectionState.value = ConnectionState.Connecting(
+                                serverName = state.serverName
+                            )
+                        }
+                    }
+
+                    if (consecutiveTimeouts >= 6) {
+                        AppLogger.w(TAG, "Tunnel stalled for 25s+. Triggering reconnect to restore socket.")
+                        reconnect()
+                        break
+                    }
+
+                    delay(3000L)
+                }
+            }
+        }
+    }
+
+    private fun restoreConnectedIfDegraded() {
+        val state = _connectionState.value
+        if (state is ConnectionState.Connecting && currentConfig != null && xrayEngine.state.value is XrayState.Running) {
+            val cfg = currentConfig
+            val since = if (savedConnectedSinceMs > 0L) savedConnectedSinceMs else System.currentTimeMillis()
+            AppLogger.i(TAG, "Tunnel requests healthy again. Restoring Connected state.")
+            _connectionState.value = ConnectionState.Connected(
+                serverName = cfg?.displayName ?: "V2RayOps Client Config",
+                serverEndpoint = cfg?.displayEndpoint ?: "sg-v2rayops.vpnxhub.com:443",
+                connectedSinceMs = since
+            )
+        }
+    }
+
+    private fun stopHealthMonitoring() {
+        healthMonitorJob?.cancel()
+        healthMonitorJob = null
+        savedConnectedSinceMs = 0L
+        _isNetworkWorkingFine.value = true
+    }
+
+    private fun testProxyProbe(urls: List<String>): Boolean {
+        val client = OkHttpClient.Builder()
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809)))
+            .connectTimeout(2000, TimeUnit.MILLISECONDS)
+            .readTimeout(2000, TimeUnit.MILLISECONDS)
+            .callTimeout(2300, TimeUnit.MILLISECONDS)
+            .build()
+
+        for (url in urls) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "V2RayOps-Client/1.0")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful || response.code == 204) {
+                        return true
+                    }
+                }
+            } catch (_: Exception) {
+                // Timeout or network unreachable
+            }
+        }
+        return false
     }
 }

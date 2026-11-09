@@ -69,6 +69,7 @@ class DashboardViewModel @Inject constructor(
 
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
     val trafficStats: StateFlow<TrafficStats> = vpnManager.trafficStats
+    val isNetworkWorkingFine: StateFlow<Boolean> = vpnManager.isNetworkWorkingFine
 
     // Smart Carrier Hunt & Auto-Connect
     private var smartHuntJob: Job? = null

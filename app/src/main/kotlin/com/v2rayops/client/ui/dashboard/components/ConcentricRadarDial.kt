@@ -63,6 +63,7 @@ fun ConcentricRadarDial(
     isSmartHunting: Boolean = false,
     isCyclingAirplane: Boolean = false,
     smartHuntProgress: SmartHuntProgress = SmartHuntProgress(),
+    isNetworkWorkingFine: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -79,6 +80,7 @@ fun ConcentricRadarDial(
 
     val isConnected = connectionState.isConnected && !smartHuntProgress.isActive && !isSmartHunting
     val isConnecting = smartHuntProgress.isActive || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+    val isHealthyWorking = isConnected && isNetworkWorkingFine
 
     // Colors matching reference mockups
     val connectedBorder = Color(0xFF6366F1)     // Electric Indigo
@@ -186,6 +188,17 @@ fun ConcentricRadarDial(
             repeatMode = RepeatMode.Restart
         ),
         label = "SonarProgress"
+    )
+
+    // 3. Network Health Telemetry Wave active when Connected & Networking works fine
+    val networkPulseProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "NetworkPulseProgress"
     )
 
     val breathMultiplier by infiniteTransition.animateFloat(
@@ -309,10 +322,25 @@ fun ConcentricRadarDial(
                             (1f - waveFraction).coerceIn(0f, 1f)
                         } else 0f
 
-                        // Dynamic dot radius: expands with heartbeat or sonar pulse
+                        // 3. Outward cascading telemetry pulse (Connected & Networking works fine)
+                        val ringPulse = if (isHealthyWorking) {
+                            val waveFraction = ((networkPulseProgress - (i * 0.16f)).mod(1f))
+                            val dist = kotlin.math.abs(waveFraction - 0.20f)
+                            (1f - (dist / 0.20f)).coerceIn(0f, 1f)
+                        } else 0f
+
+                        // Scaling ring animation: subtle outward ring radius scale (~3.8%) when healthy pulse passes
+                        val currentRingRadius = if (isHealthyWorking) {
+                            radius * (1f + ringPulse * 0.038f)
+                        } else {
+                            radius
+                        }
+
+                        // Dynamic dot radius: expands with heartbeat, sonar, or healthy telemetry pulse
                         val currentDotRadius = when {
                             isAirplanePhase -> dotRadiusPx * (1f + ringHeartbeat * 0.90f)
                             isStabilizingPhase -> dotRadiusPx * (1f + ringSonar * 0.65f)
+                            isHealthyWorking -> dotRadiusPx * (1f + ringPulse * 0.55f)
                             else -> dotRadiusPx
                         }
 
@@ -330,7 +358,8 @@ fun ConcentricRadarDial(
                             isConnected -> {
                                 val activeAlpha = 0.75f * baseFalloff * breathMultiplier
                                 val idleAlpha = 0.28f * baseFalloff
-                                (idleAlpha + (activeAlpha - idleAlpha) * ringCascade).coerceIn(0.06f, 0.95f)
+                                val surge = if (isHealthyWorking) ringPulse * 0.42f else 0f
+                                ((idleAlpha + (activeAlpha - idleAlpha) * ringCascade) + surge).coerceIn(0.06f, 0.98f)
                             }
                             isConnecting -> {
                                 val activeAlpha = 0.72f * baseFalloff * breathMultiplier
@@ -345,7 +374,8 @@ fun ConcentricRadarDial(
                         // Radiant dot gradients per event:
                         // 1. Airplane Phase: Coral Rose (#FB7185) -> Cyber Amber (#F59E0B)
                         // 2. Stabilizing Phase: Cyber Cyan (#06B6D4) -> Emerald Mint (#10B981)
-                        // 3. Normal / Connecting: animatedDotColor
+                        // 3. Connected (Healthy): High-tech radial gradient (Lavender -> Electric Indigo -> Deep Space Indigo)
+                        // 4. Connecting / Normal: animatedDotColor
                         val ringDotColor = when {
                             isAirplanePhase -> {
                                 val t = normalizedRing
@@ -361,13 +391,48 @@ fun ConcentricRadarDial(
                                 val b = (0xD4 * (1 - t) + 0x81 * t) / 255f
                                 Color(r, g, b, 1f)
                             }
+                            isConnected -> {
+                                val t = normalizedRing
+                                // High-tech radial gradient: Luminous Periwinkle Lavender (#9D9BFE) -> Electric Indigo (#6366F1) -> Deep Cosmic Indigo (#3730A3)
+                                val r = if (t < 0.5f) {
+                                    val f = t * 2f
+                                    (0x9D * (1 - f) + 0x63 * f) / 255f
+                                } else {
+                                    val f = (t - 0.5f) * 2f
+                                    (0x63 * (1 - f) + 0x37 * f) / 255f
+                                }
+                                val g = if (t < 0.5f) {
+                                    val f = t * 2f
+                                    (0x9B * (1 - f) + 0x66 * f) / 255f
+                                } else {
+                                    val f = (t - 0.5f) * 2f
+                                    (0x66 * (1 - f) + 0x30 * f) / 255f
+                                }
+                                val b = if (t < 0.5f) {
+                                    val f = t * 2f
+                                    (0xFE * (1 - f) + 0xF1 * f) / 255f
+                                } else {
+                                    val f = (t - 0.5f) * 2f
+                                    (0xF1 * (1 - f) + 0xA3 * f) / 255f
+                                }
+
+                                if (ringPulse > 0.05f) {
+                                    val highlight = ringPulse * 0.35f
+                                    val cr = (r * (1 - highlight) + 0.38f * highlight)
+                                    val cg = (g * (1 - highlight) + 0.82f * highlight)
+                                    val cb = (b * (1 - highlight) + 1.00f * highlight)
+                                    Color(cr, cg, cb, 1f)
+                                } else {
+                                    Color(r, g, b, 1f)
+                                }
+                            }
                             else -> animatedDotColor
                         }
 
                         for (j in 0 until count) {
                             val angle = j * angleStep
-                            val x = cx + radius * cos(angle).toFloat()
-                            val y = cy + radius * sin(angle).toFloat()
+                            val x = cx + currentRingRadius * cos(angle).toFloat()
+                            val y = cy + currentRingRadius * sin(angle).toFloat()
 
                             drawCircle(
                                 color = ringDotColor.copy(alpha = dotAlpha),
