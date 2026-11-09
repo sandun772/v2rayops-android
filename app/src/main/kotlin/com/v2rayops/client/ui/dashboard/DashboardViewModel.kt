@@ -59,7 +59,7 @@ class DashboardViewModel @Inject constructor(
     val ipHuntState: StateFlow<IpHuntState> = ipHuntManager.state
 
     fun startIpHunt(targetPrefix: String = "100.", onMatched: (String) -> Unit = {}) {
-        ipHuntManager.startHunt(targetPrefix, onMatched)
+        ipHuntManager.startAutoHunt(targetPrefix, onMatched)
     }
 
     fun stopIpHunt() {
@@ -70,12 +70,8 @@ class DashboardViewModel @Inject constructor(
         ipHuntManager.setTargetPrefix(prefix)
     }
 
-    fun cycleIpHuntAirplaneMode(context: Context) {
-        ipHuntManager.cycleAirplaneModeManual(context)
-    }
-
-    fun setIpHuntAutoCycleRoot(enabled: Boolean) {
-        ipHuntManager.setAutoCycleRoot(enabled)
+    fun openAirplaneSettings(context: Context) {
+        ipHuntManager.openAirplaneSettings(context)
     }
 
     val selectedConfig: StateFlow<VpnConfig?> = subscriptionRepository.observeSelectedConfig()

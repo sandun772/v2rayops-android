@@ -404,8 +404,7 @@ fun DashboardScreen(
                 },
                 onStopHunt = { viewModel.stopIpHunt() },
                 onSetTargetPrefix = { viewModel.setIpHuntTargetPrefix(it) },
-                onCycleAirplaneMode = { viewModel.cycleIpHuntAirplaneMode(context) },
-                onToggleAutoCycleRoot = { viewModel.setIpHuntAutoCycleRoot(it) },
+                onOpenAirplaneSettings = { viewModel.openAirplaneSettings(context) },
                 onConnectNow = {
                     showIpHuntDialog = false
                     handleConnectClick()

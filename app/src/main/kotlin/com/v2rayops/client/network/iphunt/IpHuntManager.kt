@@ -7,7 +7,6 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-import android.os.Build
 import android.provider.Settings
 import com.v2rayops.client.core.dispatchers.AppDispatchers
 import com.v2rayops.client.core.logger.AppLogger
@@ -34,8 +33,7 @@ data class IpHuntState(
     val selectedTargetPrefix: String = "100.",
     val isMatched: Boolean = false,
     val attempts: Int = 0,
-    val isRootAvailable: Boolean = false,
-    val isAutoCycleRoot: Boolean = false,
+    val isRootGranted: Boolean = false,
     val isCyclingNow: Boolean = false,
     val statusMessage: String = "Ready to hunt"
 )
@@ -49,8 +47,7 @@ class IpHuntManager @Inject constructor(
 
     private val _state = MutableStateFlow(
         IpHuntState(
-            currentIp = getMobileDataIp(),
-            isRootAvailable = checkRootAvailable()
+            currentIp = getMobileDataIp()
         )
     )
     val state: StateFlow<IpHuntState> = _state.asStateFlow()
@@ -60,35 +57,43 @@ class IpHuntManager @Inject constructor(
     private var lastObservedIp: String? = null
 
     init {
-        // Initial check for current active IP
         val initialIp = getMobileDataIp()
         lastObservedIp = initialIp
         _state.value = _state.value.copy(
             currentIp = initialIp,
             isMatched = isIpMatching(initialIp, _state.value.selectedTargetPrefix)
         )
+        // Check root on startup
+        scope.launch {
+            val rootOk = checkRootPermission()
+            _state.value = _state.value.copy(isRootGranted = rootOk)
+        }
     }
 
     /**
-     * Checks whether device has Superuser (su) installed for automated airplane mode toggling.
+     * Checks whether Root (su) permission is available and granted.
+     * Executes 'su -c id' which prompts Magisk/KernelSU if permission is requested for the first time.
      */
-    private fun checkRootAvailable(): Boolean {
-        return try {
-            val process = Runtime.getRuntime().exec(arrayOf("which", "su"))
-            process.waitFor() == 0
+    suspend fun checkRootPermission(): Boolean = withContext(dispatchers.io) {
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+            val reader = process.inputStream.bufferedReader()
+            val output = reader.readLine().orEmpty()
+            val code = process.waitFor()
+            code == 0 && output.contains("uid=0")
         } catch (_: Exception) {
             false
         }
     }
 
     /**
-     * Extracts the active cellular IPv4 address from device network interfaces.
-     * Prioritizes cellular radio interfaces (rmnet, ccmni, pdp, etc.) and CGNAT/Private ranges.
+     * Extracts active cellular IPv4 address from network interfaces.
+     * Prioritizes cellular radio interfaces (rmnet, ccmni, pdp, wwan, cell, etc.).
      */
     fun getMobileDataIp(): String? {
         try {
             val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces() ?: return null)
-            val candidates = mutableListOf<Pair<String, String>>() // ifaceName -> IPv4
+            val candidates = mutableListOf<Pair<String, String>>()
 
             for (iface in interfaces) {
                 if (!iface.isUp || iface.isLoopback) continue
@@ -101,7 +106,7 @@ class IpHuntManager @Inject constructor(
                 }
             }
 
-            // 1. Check known cellular interface names
+            // 1. Cellular interface priority
             val cellular = candidates.find { (name, _) ->
                 name.startsWith("rmnet") || name.startsWith("ccmni") ||
                 name.startsWith("pdp") || name.startsWith("v4-") ||
@@ -129,7 +134,7 @@ class IpHuntManager @Inject constructor(
         }
     }
 
-    private fun isIpMatching(ip: String?, targetPrefix: String): Boolean {
+    fun isIpMatching(ip: String?, targetPrefix: String): Boolean {
         if (ip.isNullOrBlank() || targetPrefix.isBlank()) return false
         val cleanPrefixes = targetPrefix.split(",", " ", ";")
             .map { it.trim() }
@@ -141,7 +146,7 @@ class IpHuntManager @Inject constructor(
     }
 
     fun setTargetPrefix(prefix: String) {
-        val clean = prefix.trim()
+        val clean = prefix.trim().ifBlank { "100." }
         val current = _state.value.currentIp
         val matched = isIpMatching(current, clean)
         _state.value = _state.value.copy(
@@ -150,103 +155,160 @@ class IpHuntManager @Inject constructor(
         )
     }
 
-    fun setAutoCycleRoot(enabled: Boolean) {
-        _state.value = _state.value.copy(isAutoCycleRoot = enabled)
+    /**
+     * Executes automatic airplane mode toggle cycle via root commands:
+     * 1. Turns Airplane Mode ON (or disables data radio)
+     * 2. Waits 1.5s for tower detachment
+     * 3. Turns Airplane Mode OFF (or re-enables data radio)
+     */
+    private suspend fun executeAutoAirplaneToggle(): Boolean = withContext(dispatchers.io) {
+        // Method 1: cmd connectivity airplane-mode (Modern standard Android 7-15)
+        try {
+            val p1 = Runtime.getRuntime().exec(arrayOf("su", "-c", "cmd connectivity airplane-mode enable"))
+            if (p1.waitFor() == 0) {
+                delay(1500)
+                val p2 = Runtime.getRuntime().exec(arrayOf("su", "-c", "cmd connectivity airplane-mode disable"))
+                if (p2.waitFor() == 0) return@withContext true
+            }
+        } catch (_: Exception) {}
+
+        // Method 2: svc data toggle (Immediate cellular radio disconnect/re-negotiate)
+        try {
+            val p3 = Runtime.getRuntime().exec(arrayOf("su", "-c", "svc data disable"))
+            if (p3.waitFor() == 0) {
+                delay(1500)
+                val p4 = Runtime.getRuntime().exec(arrayOf("su", "-c", "svc data enable"))
+                if (p4.waitFor() == 0) return@withContext true
+            }
+        } catch (_: Exception) {}
+
+        // Method 3: settings global toggle with broadcast
+        try {
+            val p5 = Runtime.getRuntime().exec(arrayOf(
+                "su", "-c",
+                "settings put global airplane_mode_on 1 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true"
+            ))
+            if (p5.waitFor() == 0) {
+                delay(1500)
+                val p6 = Runtime.getRuntime().exec(arrayOf(
+                    "su", "-c",
+                    "settings put global airplane_mode_on 0 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false"
+                ))
+                if (p6.waitFor() == 0) return@withContext true
+            }
+        } catch (_: Exception) {}
+
+        false
     }
 
     /**
-     * Starts the IP hunting monitoring loop.
-     * Listens for network changes and polls mobile data IP until matching target prefix is acquired.
+     * Starts the FULLY AUTOMATIC IP Hunting loop.
+     * Continuously cycles airplane mode in background until carrier assigns target IP prefix.
      */
-    fun startHunt(
+    fun startAutoHunt(
         targetPrefix: String = _state.value.selectedTargetPrefix,
         onMatched: (String) -> Unit = {}
     ) {
         stopHunt()
 
         val cleanPrefix = targetPrefix.trim().ifBlank { "100." }
-        val current = getMobileDataIp()
-        lastObservedIp = current
-        val matched = isIpMatching(current, cleanPrefix)
+        val initialIp = getMobileDataIp()
+        lastObservedIp = initialIp
 
-        _state.value = _state.value.copy(
-            isHunting = !matched,
-            currentIp = current,
-            selectedTargetPrefix = cleanPrefix,
-            isMatched = matched,
-            attempts = 0,
-            statusMessage = if (matched) "Target IP already acquired: $current" else "Hunting for $cleanPrefix*"
-        )
-
-        if (matched && current != null) {
-            AppLogger.i("IpHuntManager", "Current IP $current already matches target prefix $cleanPrefix")
-            onMatched(current)
+        if (isIpMatching(initialIp, cleanPrefix)) {
+            AppLogger.i("IpHuntManager", "Current IP $initialIp already matches target $cleanPrefix")
+            _state.value = _state.value.copy(
+                isHunting = false,
+                isMatched = true,
+                currentIp = initialIp,
+                statusMessage = "Target IP already acquired: $initialIp"
+            )
+            onMatched(initialIp!!)
             return
         }
+
+        _state.value = _state.value.copy(
+            isHunting = true,
+            selectedTargetPrefix = cleanPrefix,
+            isMatched = false,
+            attempts = 0,
+            statusMessage = "Initializing automated IP hunt for $cleanPrefix*..."
+        )
 
         registerNetworkWatcher(cleanPrefix, onMatched)
 
         huntingJob = scope.launch {
-            while (isActive && _state.value.isHunting) {
-                val ip = getMobileDataIp()
-                if (ip != lastObservedIp) {
-                    val wasOffline = lastObservedIp == null
-                    lastObservedIp = ip
-                    val newAttempts = if (ip != null && !wasOffline) _state.value.attempts + 1 else _state.value.attempts
+            // First verify or prompt root access
+            val hasRoot = checkRootPermission()
+            _state.value = _state.value.copy(isRootGranted = hasRoot)
 
-                    if (isIpMatching(ip, cleanPrefix)) {
-                        AppLogger.i("IpHuntManager", "MATCH FOUND: $ip on attempt #$newAttempts")
-                        _state.value = _state.value.copy(
-                            isHunting = false,
-                            isMatched = true,
-                            currentIp = ip,
-                            attempts = newAttempts,
-                            statusMessage = "Target acquired: $ip"
-                        )
-                        withContext(dispatchers.main) {
-                            onMatched(ip!!)
+            var cycleCount = 0
+
+            while (isActive && _state.value.isHunting) {
+                cycleCount++
+                _state.value = _state.value.copy(
+                    attempts = cycleCount,
+                    isCyclingNow = true,
+                    statusMessage = "Cycle #$cycleCount: Auto-toggling Airplane Mode ON..."
+                )
+
+                // Execute the automated airplane mode cycle
+                val success = executeAutoAirplaneToggle()
+
+                if (!success) {
+                    AppLogger.w("IpHuntManager", "Auto-toggle command failed (Root missing or not granted).")
+                    _state.value = _state.value.copy(
+                        isCyclingNow = false,
+                        isHunting = false,
+                        statusMessage = "Root permission required for automatic airplane mode cycling."
+                    )
+                    break
+                }
+
+                _state.value = _state.value.copy(
+                    statusMessage = "Cycle #$cycleCount: Airplane OFF. Awaiting carrier IP from tower..."
+                )
+
+                // Wait and poll for new IP assignment (up to 8 seconds)
+                var acquiredIp: String? = null
+                val pollStart = System.currentTimeMillis()
+                while (isActive && System.currentTimeMillis() - pollStart < 8000L) {
+                    delay(450)
+                    val ip = getMobileDataIp()
+                    if (ip != null) {
+                        acquiredIp = ip
+                        _state.value = _state.value.copy(currentIp = ip)
+                        if (isIpMatching(ip, cleanPrefix)) {
+                            break
                         }
-                        break
-                    } else {
-                        _state.value = _state.value.copy(
-                            currentIp = ip,
-                            attempts = newAttempts,
-                            statusMessage = if (ip == null) "Offline / Airplane Mode" else "IP: $ip (Mismatched)"
-                        )
                     }
                 }
 
-                // If root auto-cycling is enabled, trigger automatic airplane mode cycle
-                if (_state.value.isAutoCycleRoot && _state.value.isRootAvailable && !_state.value.isCyclingNow && !_state.value.isMatched) {
-                    performAutoCycleRoot()
-                }
-
-                delay(600)
-            }
-        }
-    }
-
-    private suspend fun performAutoCycleRoot() {
-        _state.value = _state.value.copy(isCyclingNow = true, statusMessage = "Auto-cycling airplane mode (Root)...")
-        withContext(dispatchers.io) {
-            try {
-                // Method 1: cmd connectivity airplane-mode
-                val p1 = Runtime.getRuntime().exec(arrayOf("su", "-c", "cmd connectivity airplane-mode enable"))
-                if (p1.waitFor() == 0) {
-                    delay(1600)
-                    val p2 = Runtime.getRuntime().exec(arrayOf("su", "-c", "cmd connectivity airplane-mode disable"))
-                    p2.waitFor()
+                // Verify result of cycle
+                if (acquiredIp != null && isIpMatching(acquiredIp, cleanPrefix)) {
+                    AppLogger.i("IpHuntManager", "TARGET IP ACQUIRED: $acquiredIp on cycle #$cycleCount!")
+                    _state.value = _state.value.copy(
+                        isHunting = false,
+                        isMatched = true,
+                        isCyclingNow = false,
+                        currentIp = acquiredIp,
+                        attempts = cycleCount,
+                        statusMessage = "TARGET ACQUIRED: $acquiredIp"
+                    )
+                    withContext(dispatchers.main) {
+                        onMatched(acquiredIp)
+                    }
+                    break
                 } else {
-                    // Method 2: svc data toggle
-                    val p3 = Runtime.getRuntime().exec(arrayOf("su", "-c", "svc data disable && sleep 1.5 && svc data enable"))
-                    p3.waitFor()
+                    val mismatchMsg = if (acquiredIp != null) "Assigned $acquiredIp (Mismatch) -> Auto-recycling..." else "No signal -> Retrying..."
+                    _state.value = _state.value.copy(
+                        isCyclingNow = false,
+                        statusMessage = mismatchMsg
+                    )
+                    delay(1200) // Brief pause before starting next cycle
                 }
-            } catch (e: Exception) {
-                AppLogger.w("IpHuntManager", "Root auto-cycle failed: ${e.message}")
             }
         }
-        delay(2500) // Wait for modem to negotiate with cell tower
-        _state.value = _state.value.copy(isCyclingNow = false)
     }
 
     private fun registerNetworkWatcher(targetPrefix: String, onMatched: (String) -> Unit) {
@@ -258,17 +320,17 @@ class IpHuntManager @Inject constructor(
 
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    handleNetworkCheck(targetPrefix, onMatched)
+                    checkAndMatch(targetPrefix, onMatched)
                 }
 
                 override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-                    handleNetworkCheck(targetPrefix, onMatched)
+                    checkAndMatch(targetPrefix, onMatched)
                 }
 
                 override fun onLost(network: Network) {
                     _state.value = _state.value.copy(
                         currentIp = null,
-                        statusMessage = "Network disconnected / Airplane active"
+                        statusMessage = "Cellular radio cycling..."
                     )
                 }
             }
@@ -278,28 +340,22 @@ class IpHuntManager @Inject constructor(
         }
     }
 
-    private fun handleNetworkCheck(targetPrefix: String, onMatched: (String) -> Unit) {
+    private fun checkAndMatch(targetPrefix: String, onMatched: (String) -> Unit) {
         val ip = getMobileDataIp() ?: return
         if (ip != lastObservedIp) {
             lastObservedIp = ip
-            val newAttempts = _state.value.attempts + 1
             if (isIpMatching(ip, targetPrefix)) {
                 _state.value = _state.value.copy(
                     isHunting = false,
                     isMatched = true,
+                    isCyclingNow = false,
                     currentIp = ip,
-                    attempts = newAttempts,
-                    statusMessage = "Target acquired: $ip"
+                    statusMessage = "TARGET ACQUIRED: $ip"
                 )
+                huntingJob?.cancel()
                 scope.launch(dispatchers.main) {
                     onMatched(ip)
                 }
-            } else {
-                _state.value = _state.value.copy(
-                    currentIp = ip,
-                    attempts = newAttempts,
-                    statusMessage = "IP: $ip (Mismatched)"
-                )
             }
         }
     }
@@ -316,13 +372,11 @@ class IpHuntManager @Inject constructor(
 
         _state.value = _state.value.copy(
             isHunting = false,
-            isCyclingNow = false
+            isCyclingNow = false,
+            statusMessage = "Hunt stopped"
         )
     }
 
-    /**
-     * Launches the system Airplane Mode settings screen for effortless one-tap manual cycling.
-     */
     fun openAirplaneSettings(ctx: Context = context) {
         try {
             val intent = Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).apply {
@@ -341,19 +395,6 @@ class IpHuntManager @Inject constructor(
                 }
                 ctx.startActivity(intent)
             }
-        }
-    }
-
-    /**
-     * Executes single airplane mode toggle cycle if root is available, otherwise opens settings.
-     */
-    fun cycleAirplaneModeManual(ctx: Context = context) {
-        if (_state.value.isRootAvailable) {
-            scope.launch {
-                performAutoCycleRoot()
-            }
-        } else {
-            openAirplaneSettings(ctx)
         }
     }
 }

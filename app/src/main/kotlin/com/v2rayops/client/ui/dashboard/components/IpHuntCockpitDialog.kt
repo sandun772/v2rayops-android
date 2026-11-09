@@ -29,12 +29,11 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,7 +46,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -62,13 +60,17 @@ private val PurpleLavender = Color(0xFFA5B4FC)
 private val DarkCardBg = Color(0xFF090D1A)
 private val DarkInsetBg = Color(0xFF050812)
 private val BorderDark = Color(0xFF1E283E)
+private val GreenAccent = Color(0xFF22C55E)
+private val GreenText = Color(0xFF4ADE80)
+private val AmberAccent = Color(0xFFF59E0B)
+private val AmberText = Color(0xFFFBBF24)
 
 /**
  * IP Hunt Cockpit Dialog:
- * Triggered by pressing and holding the center Connect button.
- * Automates target IP detection for Mobitel/Dialog zero-rated packages,
- * live-watches carrier IP address across airplane mode cycles,
- * and automatically triggers VPN connection the moment the target IP is acquired.
+ * Triggered by pressing and holding the center Connect button dial.
+ * Fully automates cellular IP acquisition for Mobitel/carrier zero-rated packages by
+ * automatically cycling airplane mode / mobile data radio in a background loop until
+ * the assigned IP matches the target subnet (e.g. 100.*), then auto-connects the VPN.
  */
 @Composable
 fun IpHuntCockpitDialog(
@@ -76,28 +78,26 @@ fun IpHuntCockpitDialog(
     onStartHunt: (String) -> Unit,
     onStopHunt: () -> Unit,
     onSetTargetPrefix: (String) -> Unit,
-    onCycleAirplaneMode: () -> Unit,
-    onToggleAutoCycleRoot: (Boolean) -> Unit,
+    onOpenAirplaneSettings: () -> Unit,
     onConnectNow: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
     var isCustomSelected by remember { mutableStateOf(false) }
     var customPrefixText by remember { mutableStateOf(state.selectedTargetPrefix) }
 
-    // Start hunting automatically when dialog opens
+    // Start automated hunt immediately upon cockpit opening
     LaunchedEffect(Unit) {
-        if (!state.isHunting && !state.isMatched) {
+        if (!state.isMatched && !state.isHunting) {
             onStartHunt(state.selectedTargetPrefix)
         }
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "ipHuntPulse")
     val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
+        initialValue = 0.35f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
+            animation = tween(750, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulseAlpha"
@@ -114,7 +114,11 @@ fun IpHuntCockpitDialog(
                 .background(DarkCardBg)
                 .border(
                     width = 1.2.dp,
-                    color = if (state.isMatched) Color(0xFF22C55E) else if (state.isHunting) PurplePrimary.copy(alpha = 0.7f) else BorderDark,
+                    color = when {
+                        state.isMatched -> GreenAccent
+                        state.isHunting -> PurplePrimary.copy(alpha = 0.75f)
+                        else -> BorderDark
+                    },
                     shape = RoundedCornerShape(18.dp)
                 )
                 .padding(20.dp)
@@ -140,15 +144,15 @@ fun IpHuntCockpitDialog(
                             Icon(
                                 imageVector = if (state.isMatched) Icons.Filled.CheckCircle else Icons.Filled.Speed,
                                 contentDescription = null,
-                                tint = if (state.isMatched) Color(0xFF4ADE80) else PurpleLavender,
+                                tint = if (state.isMatched) GreenText else PurpleLavender,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "IP HUNTER",
-                                fontSize = 15.sp,
+                                text = "AUTOMATED IP HUNTER",
+                                fontSize = 14.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
                                 color = Color.White,
@@ -232,7 +236,7 @@ fun IpHuntCockpitDialog(
                                     width = 1.dp,
                                     color = if (isCustomSelected) PurplePrimary else BorderDark,
                                     shape = RoundedCornerShape(8.dp)
-                                )
+                                    )
                                 .clickable {
                                     isCustomSelected = true
                                 }
@@ -291,7 +295,7 @@ fun IpHuntCockpitDialog(
                     }
                 }
 
-                // 3. Hero Live Mobile IP Box
+                // 3. Hero Live Cellular IP Box
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -300,8 +304,8 @@ fun IpHuntCockpitDialog(
                         .border(
                             width = 1.dp,
                             color = when {
-                                state.isMatched -> Color(0xFF22C55E)
-                                state.isHunting -> Color(0xFFF59E0B)
+                                state.isMatched -> GreenAccent
+                                state.isHunting -> AmberAccent
                                 else -> BorderDark
                             },
                             shape = RoundedCornerShape(12.dp)
@@ -315,7 +319,7 @@ fun IpHuntCockpitDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "LIVE MOBILE DATA IP",
+                                text = "CURRENT MOBILE IP",
                                 fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
                                 color = Color(0xFF64748B),
@@ -330,31 +334,50 @@ fun IpHuntCockpitDialog(
                                         .clip(CircleShape)
                                         .background(
                                             when {
-                                                state.isMatched -> Color(0xFF22C55E)
-                                                state.isHunting -> Color(0xFFF59E0B).copy(alpha = pulseAlpha)
+                                                state.isMatched -> GreenAccent
+                                                state.isHunting -> AmberAccent.copy(alpha = pulseAlpha)
                                                 else -> Color(0xFF475569)
                                             }
                                         )
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = if (state.isMatched) "LOCKED" else if (state.isHunting) "HUNTING" else "IDLE",
+                                    text = when {
+                                        state.isMatched -> "LOCKED"
+                                        state.isCyclingNow -> "AUTO-CYCLING"
+                                        state.isHunting -> "HUNTING"
+                                        else -> "IDLE"
+                                    },
                                     fontSize = 8.5.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (state.isMatched) Color(0xFF4ADE80) else if (state.isHunting) Color(0xFFFBBF24) else Color(0xFF64748B)
+                                    color = when {
+                                        state.isMatched -> GreenText
+                                        state.isCyclingNow -> AmberText
+                                        state.isHunting -> AmberText
+                                        else -> Color(0xFF64748B)
+                                    }
                                 )
                             }
                         }
 
                         // Big Monospace IP Text
-                        val displayIp = state.currentIp ?: "OFFLINE / AIRPLANE"
+                        val displayIp = when {
+                            state.isCyclingNow -> "CYCLING RADIO..."
+                            state.currentIp != null -> state.currentIp
+                            else -> "NEGOTIATING IP..."
+                        }
                         Text(
                             text = displayIp,
                             fontSize = 20.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
-                            color = if (state.isMatched) Color(0xFF4ADE80) else if (state.currentIp != null) Color.White else Color(0xFF64748B)
+                            color = when {
+                                state.isMatched -> GreenText
+                                state.isCyclingNow -> AmberText
+                                state.currentIp != null -> Color.White
+                                else -> Color(0xFF64748B)
+                            }
                         )
 
                         // Status Badge
@@ -364,93 +387,94 @@ fun IpHuntCockpitDialog(
                                 .background(
                                     when {
                                         state.isMatched -> Color(0xFF0E3820)
-                                        state.currentIp == null -> Color(0xFF1E2638)
-                                        else -> Color(0xFF332008)
+                                        state.isCyclingNow -> Color(0xFF332008)
+                                        state.isHunting -> Color(0xFF1E1B4B)
+                                        else -> Color(0xFF161F30)
                                     }
                                 )
-                                .padding(horizontal = 8.dp, vertical = 3.5.dp)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = when {
-                                    state.isMatched -> "MATCH FOUND • ${state.selectedTargetPrefix}* • AUTO-CONNECT READY"
-                                    state.currentIp == null -> "✈ AIRPLANE MODE ON • TURN OFF TO RE-CHECK IP"
-                                    else -> "MISMATCH • CYCLE AIRPLANE MODE (ATTEMPT #${state.attempts})"
-                                },
+                                text = state.statusMessage.uppercase(),
                                 fontSize = 8.5.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 color = when {
-                                    state.isMatched -> Color(0xFF4ADE80)
-                                    state.currentIp == null -> Color(0xFF93C5FD)
-                                    else -> Color(0xFFFBBF24)
+                                    state.isMatched -> GreenText
+                                    state.isCyclingNow -> AmberText
+                                    state.isHunting -> PurpleLavender
+                                    else -> Color(0xFF94A3B8)
                                 }
                             )
                         }
                     }
                 }
 
-                // 4. Root Auto-Cycle Mode or User Guidance
-                if (state.isRootAvailable) {
+                // 4. Automation Privilege Indicator
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DarkInsetBg)
+                        .border(1.dp, BorderDark, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkInsetBg)
-                            .border(1.dp, BorderDark, RoundedCornerShape(10.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Icon(
+                            imageVector = if (state.isRootGranted) Icons.Filled.Security else Icons.Filled.AirplanemodeActive,
+                            contentDescription = null,
+                            tint = if (state.isRootGranted) GreenText else AmberText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
                             Text(
-                                text = "AUTO-CYCLE (ROOT PRIVILEGED)",
+                                text = if (state.isRootGranted) "ZERO-TOUCH AUTO CYCLING ACTIVE" else "ROOT PERMISSION REQUIRED",
                                 fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = if (state.isRootGranted) Color.White else AmberText
                             )
                             Text(
-                                text = "Toggles airplane mode automatically until match",
+                                text = if (state.isRootGranted)
+                                    "Cycles airplane mode in background without manual taps"
+                                else
+                                    "Tap settings to toggle airplane mode if root unavailable",
                                 fontSize = 7.5.sp,
                                 fontFamily = FontFamily.Monospace,
                                 color = Color(0xFF64748B)
                             )
                         }
-
-                        Switch(
-                            checked = state.isAutoCycleRoot,
-                            onCheckedChange = { onToggleAutoCycleRoot(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = PurplePrimary,
-                                uncheckedThumbColor = Color(0xFF64748B),
-                                uncheckedTrackColor = Color(0xFF1E283E)
-                            )
-                        )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF0F162A))
-                            .border(1.dp, Color(0xFF1B2640), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 7.dp)
-                    ) {
-                        Text(
-                            text = "HOW TO HUNT: Turn Airplane Mode ON for 2s, then turn OFF. The app will detect your new mobile IP instantly and auto-connect when it matches.",
-                            fontSize = 8.5.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFCBD5E1),
-                            lineHeight = 12.sp
-                        )
+
+                    if (!state.isRootGranted) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF1E283E))
+                                .clickable { onOpenAirplaneSettings() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "SETTINGS",
+                                fontSize = 8.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = PurpleLavender
+                            )
+                        }
                     }
                 }
 
-                // 5. Action Buttons
+                // 5. Action Controls
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (state.isMatched) {
-                        // Success Primary Connect Button
+                        // Success Connect Button
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -479,8 +503,38 @@ fun IpHuntCockpitDialog(
                                 )
                             }
                         }
+                    } else if (state.isHunting) {
+                        // Stop Auto-Hunt Button
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1E1B4B))
+                                .border(1.dp, PurplePrimary, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onStopHunt()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(15.dp),
+                                    color = PurpleLavender,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "STOP AUTO-HUNT (CYCLE #${state.attempts})",
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PurpleLavender
+                                )
+                            }
+                        }
                     } else {
-                        // Cycle Airplane Mode Button
+                        // Start Auto-Hunt Button
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -488,41 +542,25 @@ fun IpHuntCockpitDialog(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(PurplePrimary)
                                 .clickable {
-                                    onCycleAirplaneMode()
+                                    onStartHunt(state.selectedTargetPrefix)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (state.isCyclingNow) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        color = Color.White,
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "CYCLING AIRPLANE MODE...",
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Filled.AirplanemodeActive,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (state.isRootAvailable) "CYCLE AIRPLANE MODE (ROOT)" else "OPEN AIRPLANE SETTINGS",
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Filled.Refresh,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "START AUTO-HUNT",
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
                             }
                         }
                     }
