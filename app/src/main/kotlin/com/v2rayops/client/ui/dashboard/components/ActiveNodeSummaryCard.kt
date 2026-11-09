@@ -36,20 +36,43 @@ import com.v2rayops.client.domain.model.VpnConfig
 data class ConfigPackageDetails(
     val drawableRes: Int,
     val isp: String,
-    val limit: String
+    val limit: String,
+    val packageName: String = "Universal",
+    val displayRemark: String = "Universal - 100GB",
+    val expiryFormatted: String = "Never"
 )
+
+fun formatConfigExpiry(rawExpiry: String?): String {
+    if (rawExpiry.isNullOrBlank()) return "Never"
+    val dateStr = rawExpiry.trim().take(10)
+    return try {
+        val parts = dateStr.split("-")
+        if (parts.size == 3) {
+            val months = listOf("", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+            val monthIdx = parts[1].toIntOrNull() ?: 0
+            val monthName = if (monthIdx in 1..12) months[monthIdx] else parts[1]
+            "${parts[2]} $monthName ${parts[0]}"
+        } else dateStr
+    } catch (_: Exception) {
+        dateStr
+    }
+}
 
 fun deriveConfigPackageDetails(config: VpnConfig?): ConfigPackageDetails {
     if (config == null) {
         return ConfigPackageDetails(
             drawableRes = R.drawable.ic_package_bolt,
             isp = "SELECT ISP",
-            limit = "100 GB"
+            limit = "100GB",
+            packageName = "Universal",
+            displayRemark = "Universal - 100GB",
+            expiryFormatted = "Never"
         )
     }
 
-    val raw = (config.displayName + " " + config.remark).lowercase()
+    val raw = (config.displayName + " " + config.remark + " " + config.configName).lowercase()
 
+    // 1. Detect ISP
     val isp = when {
         "mobitel" in raw -> "MOBITEL"
         "dialog" in raw -> "DIALOG"
@@ -60,17 +83,42 @@ fun deriveConfigPackageDetails(config: VpnConfig?): ConfigPackageDetails {
         else -> "V2RAYOPS"
     }
 
-    // Extract quota / limit like 100 GB, 50 GB, 76.36 GB or PAYG
-    val gbRegex = Regex("""(\d+(\.\d+)?\s*(?:gb|mb))""", RegexOption.IGNORE_CASE)
-    val match = gbRegex.find(config.displayName) ?: gbRegex.find(config.remark)
+    // 2. Extract Quota / Limit (e.g. 100GB, 50GB, Unlimited)
+    val gbRegex = Regex("""(\d+(\.\d+)?)\s*(gb|mb)""", RegexOption.IGNORE_CASE)
+    val match = gbRegex.find(config.displayName) ?: gbRegex.find(config.remark) ?: gbRegex.find(config.configName)
     val limit = when {
-        match != null -> match.value.uppercase()
-        "payg" in raw || "pay-as-you-go" in raw -> "PAYG (76.36 GB)"
-        "unlimited" in raw -> "UNLIMITED"
-        else -> "100 GB"
+        "unlimited" in raw -> "Unlimited"
+        "payg" in raw || "pay-as-you-go" in raw -> "PAYG"
+        match != null -> {
+            val num = match.groupValues[1]
+            val unit = match.groupValues[3].uppercase()
+            "$num$unit"
+        }
+        else -> "100GB"
     }
 
-    // Authentic Brand Package Icon (Real Zoom, TikTok, YouTube, Gaming, WhatsApp, Bolt)
+    // 3. Package Name (TikTok, Zoom, YouTube, Gaming, WhatsApp, Social, etc.)
+    val pkgName = when {
+        "tiktok" in raw -> "TikTok"
+        "zoom" in raw -> "Zoom"
+        "teams" in raw -> "Teams"
+        "youtube" in raw || "video" in raw || "stream" in raw -> "YouTube"
+        "game" in raw || "free fire" in raw || "pubg" in raw || "cod" in raw -> "Gaming"
+        "chat" in raw || "whatsapp" in raw -> "WhatsApp"
+        "social" in raw || "facebook" in raw -> "Social"
+        "work" in raw || "learn" in raw -> "Work & Learn"
+        "conference" in raw -> "Conference"
+        else -> {
+            val parts = config.displayName.split("-").map { it.trim() }
+            if (parts.size >= 2) {
+                parts[1].substringBefore("(").substringBefore("#").trim().ifBlank { "Universal" }
+            } else {
+                config.displayName.substringBefore("(").substringBefore("#").trim().ifBlank { "Universal" }
+            }
+        }
+    }
+
+    // 4. Authentic Brand Package Icon (Real Zoom, TikTok, YouTube, Gaming, WhatsApp, Bolt)
     val drawable = when {
         "zoom" in raw || "teams" in raw || "meet" in raw || "conference" in raw || "work" in raw || "learn" in raw ->
             R.drawable.ic_package_zoom
@@ -86,10 +134,16 @@ fun deriveConfigPackageDetails(config: VpnConfig?): ConfigPackageDetails {
             R.drawable.ic_package_bolt
     }
 
+    val displayRemark = "$pkgName - $limit"
+    val expiryFormatted = formatConfigExpiry(config.expiresAt)
+
     return ConfigPackageDetails(
         drawableRes = drawable,
         isp = isp,
-        limit = limit
+        limit = limit,
+        packageName = pkgName,
+        displayRemark = displayRemark,
+        expiryFormatted = expiryFormatted
     )
 }
 
@@ -101,9 +155,8 @@ fun ActiveNodeSummaryCard(
     modifier: Modifier = Modifier
 ) {
     val meta = remember(config) { deriveConfigPackageDetails(config) }
-    val title = config?.displayName?.ifBlank { "Tokyo 03" } ?: "Tokyo 03"
-    // User instruction: "dont show the remarks show the config isp and limit in remarks"
-    val subtitle = "${meta.isp} • ${meta.limit}"
+    val title = if (config != null) meta.displayRemark else "Tokyo 03"
+    val subtitle = if (config != null) "${meta.isp} • Exp: ${meta.expiryFormatted}" else "${meta.isp} • ${meta.limit}"
     val (pingDisplay, pingColor) = when {
         pingMs == null -> "-- ms" to Color(0xFF64748B)
         pingMs <= 0L -> "-- ms" to Color(0xFF64748B)
@@ -143,7 +196,7 @@ fun ActiveNodeSummaryCard(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Center Column: Title + ISP & Limit Subtitle
+            // Center Column: Title (Package - Limit) + Subtitle (ISP • Exp: Date)
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -169,25 +222,32 @@ fun ActiveNodeSummaryCard(
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Latency + Chevron
+            // Ping Pill Indicator
             Row(
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF0D1426))
+                    .border(1.dp, Color(0xFF16213D), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = pingDisplay,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
                     color = pingColor
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Details",
-                    tint = Color(0xFF64748B),
-                    modifier = Modifier.size(16.dp)
-                )
             }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = Color(0xFF475569),
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }

@@ -70,15 +70,27 @@ fun ServerSelectionScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
 
+    // Filter out generated sub-configs (SPEED, BALANCED, STABILITY) so user only sees assigned base configurations
     val filteredConfigs = remember(configs, searchQuery) {
-        if (searchQuery.isBlank()) configs
+        val baseConfigs = configs.filter { cfg ->
+            val mode = cfg.tuningMode?.uppercase()
+            val isModeSubConfig = mode == "SPEED" || mode == "BALANCED" || mode == "STABILITY"
+            val hasModeInName = cfg.displayName.contains(Regex("""\[(SPEED|BALANCED|STABILITY)\]""", RegexOption.IGNORE_CASE)) ||
+                cfg.remark.contains(Regex("""\[(SPEED|BALANCED|STABILITY)\]""", RegexOption.IGNORE_CASE)) ||
+                cfg.configName.contains(Regex("""\[(SPEED|BALANCED|STABILITY)\]""", RegexOption.IGNORE_CASE))
+            !isModeSubConfig && !hasModeInName
+        }
+        if (searchQuery.isBlank()) baseConfigs
         else {
             val q = searchQuery.lowercase()
-            configs.filter {
+            baseConfigs.filter {
+                val meta = deriveConfigPackageDetails(it)
+                meta.displayRemark.lowercase().contains(q) ||
+                meta.isp.lowercase().contains(q) ||
+                meta.limit.lowercase().contains(q) ||
                 it.displayName.lowercase().contains(q) ||
                 it.serverCountry.lowercase().contains(q) ||
-                it.protocol.lowercase().contains(q) ||
-                it.host.lowercase().contains(q)
+                it.protocol.lowercase().contains(q)
             }
         }
     }
@@ -137,7 +149,7 @@ fun ServerSelectionScreen(
                     )
                 }
 
-                // ⏱ Functional Live Edge TCP Socket Test All Button
+                // Functional Live Edge TCP Socket Test All Button
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -182,7 +194,7 @@ fun ServerSelectionScreen(
                 }
             }
 
-            // 2. Search Box [🔍 Search by name, country, protocol]
+            // 2. Search Box [Search by package, limit, ISP, protocol]
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -212,7 +224,7 @@ fun ServerSelectionScreen(
                     decorationBox = { innerTextField ->
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search by name, country, protocol",
+                                text = "Search by package, limit, ISP, country",
                                 color = Color(0xFF64748B),
                                 fontSize = 13.sp,
                                 fontFamily = FontFamily.SansSerif
@@ -262,7 +274,12 @@ fun ServerSelectionScreen(
                     }
 
                     items(filteredConfigs, key = { it.id }) { config ->
-                        val isSelected = config.id == selectedConfig?.id
+                        val isSelected = config.id == selectedConfig?.id ||
+                            (selectedConfig?.id ?: 0L) % 1000L == config.id ||
+                            (selectedConfig?.id ?: 0L) / 1000L == config.id ||
+                            (config.displayName.substringBefore(" [") == selectedConfig?.displayName?.substringBefore(" [") &&
+                             config.host == selectedConfig?.host)
+
                         val realPing = pingMap[config.id]
                         NodeCardItem(
                             config = config,
@@ -295,6 +312,13 @@ fun ServerSelectionScreen(
     }
 }
 
+/**
+ * NodeCardItem:
+ * - Title: Package Name - Limit (e.g. "TikTok - 100GB" or "TikTok - Unlimited")
+ * - Subtitle: ISP • Exp: Expiry Date (e.g. "MOBITEL • Exp: 28 Nov 2026")
+ * - No SNIs displayed
+ * - No sub-configs / mode badges displayed
+ */
 @Composable
 private fun NodeCardItem(
     config: VpnConfig,
@@ -303,8 +327,8 @@ private fun NodeCardItem(
     onClick: () -> Unit
 ) {
     val meta = remember(config) { deriveConfigPackageDetails(config) }
-    val routeDomain = config.displayRouteDomain.takeIf { it.isNotBlank() && !it.contains("vpnxhub.com") }
-    val subtitle = if (routeDomain != null) "${meta.isp} • $routeDomain • ${meta.limit}" else "${meta.isp} • ${meta.limit}"
+    val title = meta.displayRemark
+    val subtitle = "${meta.isp} • Exp: ${meta.expiryFormatted}"
 
     val (pingText, pingColor) = when {
         pingMs == null -> "-- ms" to Color(0xFF64748B)
@@ -349,51 +373,18 @@ private fun NodeCardItem(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Center details: Title + Mode Badge + ISP & Limit Subtitle
+            // Center details: Title (Package Name - Limit) + Subtitle (ISP • Exp: Date)
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = config.displayName,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (!config.tuningMode.isNullOrEmpty()) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        val (badgeBg, badgeBorder, badgeText) = when (config.tuningMode.uppercase()) {
-                            "SPEED" -> Triple(Color(0xFF1E1B4B), Color(0xFF4338CA), Color(0xFF818CF8))
-                            "STABILITY" -> Triple(Color(0xFF064E3B), Color(0xFF059669), Color(0xFF34D399))
-                            else -> Triple(Color(0xFF2E1065), Color(0xFF7C3AED), Color(0xFFC084FC))
-                        }
-                        val bufferKb = config.customTcpBufferKb ?: when (config.tuningMode.uppercase()) {
-                            "SPEED" -> 1024
-                            "STABILITY" -> 256
-                            else -> 512
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(badgeBg)
-                                .border(0.5.dp, badgeBorder, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 5.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "${config.tuningMode.uppercase()} • ${bufferKb}KB",
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = badgeText
-                            )
-                        }
-                    }
-                }
+                Text(
+                    text = title,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,

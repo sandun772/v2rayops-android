@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -30,7 +31,18 @@ class ServerSelectionViewModel @Inject constructor(
 
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
 
+    // Filters out generated sub-configs (SPEED, BALANCED, STABILITY) so only assigned configurations appear
     val configs: StateFlow<List<VpnConfig>> = subscriptionRepository.observeConfigs()
+        .map { list ->
+            list.filter { cfg ->
+                val mode = cfg.tuningMode?.uppercase()
+                val isModeSubConfig = mode == "SPEED" || mode == "BALANCED" || mode == "STABILITY"
+                val hasModeInName = cfg.displayName.contains(Regex("""\[(SPEED|BALANCED|STABILITY)\]""", RegexOption.IGNORE_CASE)) ||
+                    cfg.remark.contains(Regex("""\[(SPEED|BALANCED|STABILITY)\]""", RegexOption.IGNORE_CASE)) ||
+                    cfg.configName.contains(Regex("""\[(SPEED|BALANCED|STABILITY)\]""", RegexOption.IGNORE_CASE))
+                !isModeSubConfig && !hasModeInName
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val selectedConfig: StateFlow<VpnConfig?> = subscriptionRepository.observeSelectedConfig()
