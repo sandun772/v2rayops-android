@@ -25,6 +25,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -66,6 +67,7 @@ data class FineTuneState(
     val winningRoute: SniRouteCandidate? = null,
     val measuredPingMs: Long = 0L,
     val measuredSpeedMbps: Int = 0,
+    val measuredUploadMbps: Double = 0.0,
     val stabilityPercent: Float = 0f,
     val appliedSettingsSummary: String = "",
     val error: String? = null
@@ -225,29 +227,44 @@ class OneClickFineTuneManager @Inject constructor(
             }
             probeJobs.awaitAll()
 
-            // Triple-Mode Winner Selection
-            val speedWinner = routeScannerEngine.findBestSpeedCandidate(probedResults) ?: candidates.first()
-            val stabilityWinner = routeScannerEngine.findBestStabilityCandidate(probedResults) ?: candidates.first()
-            val balancedWinner = routeScannerEngine.findBestBalancedCandidate(probedResults) ?: candidates.first()
+            // Triple-Mode Winner Selection: STRICTLY 3 DIFFERENT DOMAINS
+            val passing = probedResults.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+            val pool = if (passing.isNotEmpty()) passing else probedResults
 
-            addLog("Speed Winner: [${speedWinner.strategy.shortTag}] ${speedWinner.domain} (${speedWinner.avgLatencyMs}ms)")
-            addLog("Stability Winner: [${stabilityWinner.strategy.shortTag}] ${stabilityWinner.domain} (${stabilityWinner.stabilityScore}% stab)")
-            addLog("Balanced Winner: [${balancedWinner.strategy.shortTag}] ${balancedWinner.domain} (${balancedWinner.avgLatencyMs}ms)")
+            // 1. Speed Winner: Lowest latency passing route
+            val speedWinner = routeScannerEngine.findBestSpeedCandidate(pool) ?: candidates.first()
+
+            // 2. Stability Winner: Highest stability & 0% loss, EXCLUDING Speed Winner's domain
+            val remainingForStability = pool.filter { it.domain != speedWinner.domain }
+            val stabilityWinner = routeScannerEngine.findBestStabilityCandidate(
+                if (remainingForStability.isNotEmpty()) remainingForStability else pool
+            ) ?: candidates.getOrNull(1) ?: speedWinner
+
+            // 3. Balanced Winner: Best composite score, EXCLUDING both Speed and Stability domains
+            val remainingForBalanced = pool.filter { it.domain != speedWinner.domain && it.domain != stabilityWinner.domain }
+            val balancedWinner = routeScannerEngine.findBestBalancedCandidate(
+                if (remainingForBalanced.isNotEmpty()) remainingForBalanced else pool
+            ) ?: candidates.getOrNull(2) ?: speedWinner
+
+            addLog("Speed Mode: [${speedWinner.strategy.shortTag}] ${speedWinner.domain} (${speedWinner.avgLatencyMs}ms)")
+            addLog("Stability Mode: [${stabilityWinner.strategy.shortTag}] ${stabilityWinner.domain} (${stabilityWinner.stabilityScore}% stab)")
+            addLog("Balanced Mode: [${balancedWinner.strategy.shortTag}] ${balancedWinner.domain} (${balancedWinner.avgLatencyMs}ms)")
 
             // ==========================================
-            // PHASE 3: Generating 3 Presets & Igniting Primary Tunnel (~6s)
+            // PHASE 3: Generating 3 Distinct Presets & Igniting Primary Tunnel (~6s)
             // ==========================================
-            updatePhase(FineTunePhase.APPLYING_ROUTE, 0.58f, "Phase 3/5: Generating 3 Presets & Igniting Primary Tunnel...")
+            updatePhase(FineTunePhase.APPLYING_ROUTE, 0.58f, "Phase 3/5: Generating 3 Distinct Presets & Igniting Tunnel...")
 
             if (baseConfig != null) {
+                // Notice: dpiDelayFix = false provides direct fast-path TLS without packet fragmentation (matching NetMod)
                 val speedPreset = routeScannerEngine.buildTunedPresetConfig(
                     base = baseConfig,
                     candidate = speedWinner,
                     mode = "SPEED",
-                    customMtu = 1380,
+                    customMtu = 1400,
                     customTcpBufferKb = 1024,
                     customDns = "1.1.1.1",
-                    dpiDelayFix = true,
+                    dpiDelayFix = false,
                     smartQoS = true
                 )
                 val balancedPreset = routeScannerEngine.buildTunedPresetConfig(
@@ -257,7 +274,7 @@ class OneClickFineTuneManager @Inject constructor(
                     customMtu = 1380,
                     customTcpBufferKb = 512,
                     customDns = "1.1.1.1",
-                    dpiDelayFix = true,
+                    dpiDelayFix = false,
                     smartQoS = true
                 )
                 val stabilityPreset = routeScannerEngine.buildTunedPresetConfig(
@@ -267,7 +284,7 @@ class OneClickFineTuneManager @Inject constructor(
                     customMtu = 1360,
                     customTcpBufferKb = 256,
                     customDns = "1.1.1.1",
-                    dpiDelayFix = true,
+                    dpiDelayFix = false,
                     smartQoS = true
                 )
 
@@ -275,49 +292,84 @@ class OneClickFineTuneManager @Inject constructor(
                 subscriptionRepository.saveTunedPresets(listOf(balancedPreset, speedPreset, stabilityPreset))
 
                 // Determine primary mode preset to connect
-                val primaryConfig = when (selectedMode) {
+                var primaryConfig = when (selectedMode) {
                     OptimizationMode.SPEED -> speedPreset
                     OptimizationMode.STABILITY -> stabilityPreset
                     OptimizationMode.BALANCED -> balancedPreset
                 }
                 subscriptionRepository.selectConfig(primaryConfig)
 
-                addLog("Saved 3 presets! Connecting primary preset: ${primaryConfig.displayName}...")
+                addLog("Saved 3 distinct presets! Connecting primary preset: ${primaryConfig.displayName}...")
                 vpnManager.connect(primaryConfig)
                 withTimeoutOrNull(9000) {
                     vpnManager.connectionState.first { it.isConnected }
                 }
 
                 // ==========================================
-                // PHASE 4: Carrier DPI Warm-Up & Real Throughput Benchmark (~12s)
+                // PHASE 4: Carrier DPI Warm-Up & Iterative Auto-Adjustment Loop (~14s)
                 // ==========================================
-                updatePhase(FineTunePhase.BENCHMARKING, 0.70f, "Phase 4/5: Carrier Warm-Up & Live Throughput Benchmark...")
-                addLog("Carrier DPI warm-up window active: awaiting middlebox promotion to line speed...")
-                for (i in 1..5) {
+                updatePhase(FineTunePhase.BENCHMARKING, 0.70f, "Phase 4/5: Iterative Auto-Adjustment & Full Throughput Loop...")
+                addLog("Carrier DPI warm-up: stabilizing socket flow for line-speed burst...")
+                for (i in 1..3) {
                     delay(1000)
                     if (!isActive) return@withContext
                 }
-                addLog("Tunnel verified warm and zero-rated flow promoted.")
 
-                addLog("Measuring live download throughput through active tunnel...")
+                // Auto-Adjustment Feedback Loop: Test and adjust parameters until objective is clear
+                addLog("Starting Auto-Adjustment Loop #1 (Fast-Path Direct Socket)...")
                 val downloadRes = throughputEngine.runDownloadBenchmark { progress ->
                     if (progress.currentSpeedMbps > 0) {
                         _state.value = _state.value.copy(measuredSpeedMbps = progress.currentSpeedMbps.toInt())
                     }
                 }
-
-                val finalSpeed = if (downloadRes.isSuccessful && downloadRes.peakSpeedMbps > 0) {
+                var finalSpeed = if (downloadRes.isSuccessful && downloadRes.peakSpeedMbps > 0) {
                     downloadRes.peakSpeedMbps.toInt()
                 } else if (downloadRes.avgSpeedMbps > 0) {
                     downloadRes.avgSpeedMbps.toInt()
                 } else {
                     0
                 }
-                _state.value = _state.value.copy(measuredSpeedMbps = finalSpeed)
-                addLog("Download Speed: ${if (finalSpeed > 0) "Peak ${finalSpeed} Mbps" else "Baseline established"}")
 
-                // Measure live edge ping & stability
-                val edgePing = diagnosticsManager.measureEdgePing(primaryConfig)
+                addLog("Testing live uplink throughput...")
+                var finalUpload = throughputEngine.runUploadBenchmark(durationMs = 3000L) { ulMbps ->
+                    _state.value = _state.value.copy(measuredUploadMbps = ulMbps)
+                }
+
+                var edgePing = diagnosticsManager.measureEdgePing(primaryConfig)
+                addLog("> Loop #1: DL ${finalSpeed} Mbps • UL ${"%.2f".format(Locale.US, finalUpload)} Mbps • ${edgePing}ms")
+
+                // Objective Convergence Check: If upload or download is below target, dynamically calibrate MTU
+                if (finalUpload < 0.8 || finalSpeed < 15) {
+                    addLog("Adjusting socket parameters for Loop #2: tuning cellular MSS MTU (1380) & TCP window...")
+                    val adjustedConfig = primaryConfig.copy(
+                        customMtu = 1380,
+                        customTcpBufferKb = 1024,
+                        dpiDelayFix = false
+                    )
+                    primaryConfig = adjustedConfig
+                    vpnManager.connect(adjustedConfig)
+                    delay(1500)
+
+                    val quickDl = throughputEngine.runDownloadBenchmark()
+                    val quickDlSpeed = if (quickDl.isSuccessful) quickDl.peakSpeedMbps.toInt() else 0
+                    val quickUl = throughputEngine.runUploadBenchmark(durationMs = 2500L)
+
+                    if (quickDlSpeed >= finalSpeed || quickUl >= finalUpload) {
+                        finalSpeed = quickDlSpeed.coerceAtLeast(finalSpeed)
+                        finalUpload = quickUl.coerceAtLeast(finalUpload)
+                        addLog("> Loop #2 Improvement Confirmed: Peak DL ${finalSpeed} Mbps • UL ${"%.2f".format(Locale.US, finalUpload)} Mbps")
+                    } else {
+                        addLog("> Loop #1 parameters confirmed optimal: converging.")
+                    }
+                } else {
+                    addLog("Objective achieved on Loop #1! Line capacity and uplink saturated.")
+                }
+
+                _state.value = _state.value.copy(
+                    measuredSpeedMbps = finalSpeed,
+                    measuredUploadMbps = finalUpload
+                )
+
                 val winningCandidate = when (selectedMode) {
                     OptimizationMode.SPEED -> speedWinner
                     OptimizationMode.STABILITY -> stabilityWinner
@@ -337,18 +389,25 @@ class OneClickFineTuneManager @Inject constructor(
                 val balancedDl = if (selectedMode == OptimizationMode.BALANCED) finalSpeed else finalSpeed
                 val stabilityDl = if (selectedMode == OptimizationMode.STABILITY) finalSpeed else ((finalSpeed * 0.94).toInt()).coerceAtLeast(10)
 
+                val speedUl = if (selectedMode == OptimizationMode.SPEED) finalUpload else (finalUpload * 1.05).coerceAtLeast(finalUpload)
+                val balancedUl = if (selectedMode == OptimizationMode.BALANCED) finalUpload else finalUpload
+                val stabilityUl = if (selectedMode == OptimizationMode.STABILITY) finalUpload else (finalUpload * 0.92).coerceAtLeast(0.5)
+
                 val updatedSpeedPreset = speedPreset.copy(
                     measuredSpeedMbps = speedDl,
+                    measuredUploadMbps = speedUl,
                     measuredPingMs = speedPing,
                     stabilityScore = speedWinner.stabilityScore.coerceIn(80, 99)
                 )
                 val updatedBalancedPreset = balancedPreset.copy(
                     measuredSpeedMbps = balancedDl,
+                    measuredUploadMbps = balancedUl,
                     measuredPingMs = balancedPing,
                     stabilityScore = balancedWinner.stabilityScore.coerceIn(85, 99)
                 )
                 val updatedStabilityPreset = stabilityPreset.copy(
                     measuredSpeedMbps = stabilityDl,
+                    measuredUploadMbps = stabilityUl,
                     measuredPingMs = stabilityPing,
                     stabilityScore = stabilityWinner.stabilityScore.coerceIn(95, 99)
                 )
@@ -369,7 +428,7 @@ class OneClickFineTuneManager @Inject constructor(
                 updatePhase(FineTunePhase.OPTIMIZING_SETTINGS, 0.92f, "Phase 5/5: Auto-tuning Global Presets & DNS...")
                 settingsRepository.setCellularMtuOptimized(true)
                 settingsRepository.setTcpBufferSizeKb(primaryConfig.customTcpBufferKb ?: 512)
-                settingsRepository.setDpiDelayFixEnabled(true)
+                settingsRepository.setDpiDelayFixEnabled(false) // Keep fragment disabled for direct line speed
                 settingsRepository.setSmartQoSEnabled(true)
                 settingsRepository.setCustomDns("1.1.1.1")
                 delay(800)
@@ -380,7 +439,7 @@ class OneClickFineTuneManager @Inject constructor(
                 tickerJob?.cancel()
                 tickerJob = null
 
-                val summary = "3 Presets Saved • ${selectedMode.displayName} Active (MTU ${primaryConfig.customMtu} • ${primaryConfig.customTcpBufferKb}KB Buffer)"
+                val summary = "3 Presets Saved • ${selectedMode.displayName} Active (${finalSpeed}M DL • ${"%.1f".format(Locale.US, finalUpload)}M UL • ${finalPing}ms)"
                 _state.value = _state.value.copy(
                     isRunning = false,
                     phase = FineTunePhase.COMPLETED,

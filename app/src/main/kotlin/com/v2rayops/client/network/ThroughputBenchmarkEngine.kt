@@ -6,10 +6,14 @@ import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.domain.repository.SettingsRepository
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -233,6 +237,52 @@ class ThroughputBenchmarkEngine @Inject constructor(
             isSuccessful = success,
             errorMessage = if (success) "" else lastError
         )
+    }
+
+    /**
+     * Executes an upload throughput benchmark by pushing chunks to Cloudflare Anycast edge
+     * through the active tunnel proxy (127.0.0.1:10809).
+     */
+    suspend fun runUploadBenchmark(
+        durationMs: Long = 3500L,
+        onProgress: (currentSpeedMbps: Double) -> Unit = {}
+    ): Double = withContext(dispatchers.io) {
+        val client = buildHttpClient(timeoutSec = 6)
+        val startTime = System.currentTimeMillis()
+        val endTime = startTime + durationMs
+        val uploadChunk = ByteArray(131072) // 128KB chunk
+        java.util.Random().nextBytes(uploadChunk)
+        val mediaType = "application/octet-stream".toMediaType()
+        var totalBytes = 0L
+        var peakMbps = 0.0
+
+        while (System.currentTimeMillis() < endTime && isActive) {
+            try {
+                val callStart = System.currentTimeMillis()
+                val body = uploadChunk.toRequestBody(mediaType)
+                val req = Request.Builder()
+                    .url("https://speed.cloudflare.com/__up")
+                    .post(body)
+                    .header("User-Agent", "V2RayOps-SpeedTest/1.0")
+                    .header("Cache-Control", "no-cache")
+                    .build()
+
+                client.newCall(req).execute().use { res ->
+                    if (res.isSuccessful) {
+                        totalBytes += uploadChunk.size
+                        val callSec = (System.currentTimeMillis() - callStart).coerceAtLeast(1) / 1000.0
+                        val chunkMbps = (uploadChunk.size * 8.0) / (callSec * 1_000_000.0)
+                        if (chunkMbps > peakMbps) peakMbps = chunkMbps
+                        onProgress(chunkMbps)
+                    }
+                }
+            } catch (_: Exception) {
+                delay(100)
+            }
+        }
+        val elapsedSec = (System.currentTimeMillis() - startTime).coerceAtLeast(1) / 1000.0
+        val avgMbps = if (elapsedSec > 0 && totalBytes > 0) (totalBytes * 8.0) / (elapsedSec * 1_000_000.0) else 0.0
+        peakMbps.coerceAtLeast(avgMbps)
     }
 
     /**

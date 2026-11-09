@@ -303,7 +303,8 @@ private fun NodeCardItem(
     onClick: () -> Unit
 ) {
     val meta = remember(config) { deriveConfigPackageDetails(config) }
-    val subtitle = "${meta.isp} • ${meta.limit}"
+    val routeDomain = config.displayRouteDomain.takeIf { it.isNotBlank() && !it.contains("vpnxhub.com") }
+    val subtitle = if (routeDomain != null) "${meta.isp} • $routeDomain • ${meta.limit}" else "${meta.isp} • ${meta.limit}"
 
     val (pingText, pingColor) = when {
         pingMs == null -> "-- ms" to Color(0xFF64748B)

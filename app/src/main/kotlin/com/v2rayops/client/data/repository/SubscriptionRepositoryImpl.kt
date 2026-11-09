@@ -73,6 +73,7 @@ class SubscriptionRepositoryImpl @Inject constructor(
                         dpiDelayFix = if (obj.has("dpiDelayFix") && !obj.isNull("dpiDelayFix")) obj.getBoolean("dpiDelayFix") else null,
                         smartQoS = if (obj.has("smartQoS") && !obj.isNull("smartQoS")) obj.getBoolean("smartQoS") else null,
                         measuredSpeedMbps = if (obj.has("measuredSpeedMbps") && !obj.isNull("measuredSpeedMbps")) obj.getInt("measuredSpeedMbps") else null,
+                        measuredUploadMbps = if (obj.has("measuredUploadMbps") && !obj.isNull("measuredUploadMbps")) obj.getDouble("measuredUploadMbps") else null,
                         measuredPingMs = if (obj.has("measuredPingMs") && !obj.isNull("measuredPingMs")) obj.getLong("measuredPingMs") else null,
                         stabilityScore = if (obj.has("stabilityScore") && !obj.isNull("stabilityScore")) obj.getInt("stabilityScore") else null
                     )
@@ -119,6 +120,7 @@ class SubscriptionRepositoryImpl @Inject constructor(
                     c.dpiDelayFix?.let { put("dpiDelayFix", it) }
                     c.smartQoS?.let { put("smartQoS", it) }
                     c.measuredSpeedMbps?.let { put("measuredSpeedMbps", it) }
+                    c.measuredUploadMbps?.let { put("measuredUploadMbps", it) }
                     c.measuredPingMs?.let { put("measuredPingMs", it) }
                     c.stabilityScore?.let { put("stabilityScore", it) }
                 }

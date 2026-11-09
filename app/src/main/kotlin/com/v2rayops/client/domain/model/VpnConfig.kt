@@ -24,7 +24,8 @@ data class VpnConfig(
     val customDns: String? = null,            // e.g. "1.1.1.1"
     val dpiDelayFix: Boolean? = null,         // TLS fragmentation bypass
     val smartQoS: Boolean? = null,            // Adaptive QoS traffic shaping
-    val measuredSpeedMbps: Int? = null,       // Live benchmarked peak speed
+    val measuredSpeedMbps: Int? = null,       // Live benchmarked peak download speed
+    val measuredUploadMbps: Double? = null,   // Live benchmarked upload speed
     val measuredPingMs: Long? = null,         // Live benchmarked round-trip latency
     val stabilityScore: Int? = null           // Live benchmarked stability score (0-100)
 ) {
@@ -68,4 +69,11 @@ data class VpnConfig(
 
     val effectiveSni: String
         get() = activeSni.ifBlank { host.ifBlank { "sg-v2rayops.vpnxhub.com" } }
+
+    /**
+     * Returns the actual user-facing bug host or SNI domain associated with this profile
+     * (e.g. support.zoom.us, teams.microsoft.com, aka.ms) rather than the internal VPS domain.
+     */
+    val displayRouteDomain: String
+        get() = if (isAddrFronting && host.isNotBlank()) host else effectiveSni
 }

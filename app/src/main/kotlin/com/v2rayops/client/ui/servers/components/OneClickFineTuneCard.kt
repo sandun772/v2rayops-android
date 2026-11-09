@@ -48,6 +48,7 @@ import com.v2rayops.client.network.FineTunePhase
 import com.v2rayops.client.network.FineTuneState
 import com.v2rayops.client.network.OptimizationMode
 import com.v2rayops.client.ui.dashboard.components.deriveConfigPackageDetails
+import java.util.Locale
 
 @Composable
 fun OneClickFineTuneCard(
@@ -361,7 +362,7 @@ fun OneClickFineTuneCard(
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = "• ${preset.effectiveSni}",
+                                                text = "• ${preset.displayRouteDomain}",
                                                 fontSize = 11.sp,
                                                 fontFamily = FontFamily.Monospace,
                                                 color = Color(0xFF94A3B8),
@@ -369,8 +370,11 @@ fun OneClickFineTuneCard(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
+                                        val dlStr = if (preset.measuredSpeedMbps != null && preset.measuredSpeedMbps > 0) "${preset.measuredSpeedMbps}M DL" else ""
+                                        val ulStr = if (preset.measuredUploadMbps != null && preset.measuredUploadMbps > 0.0) " • ${"%.1f".format(Locale.US, preset.measuredUploadMbps)}M UL" else ""
+                                        val throughputStr = if (dlStr.isNotBlank()) "$dlStr$ulStr • " else ""
                                         Text(
-                                            text = "MTU ${preset.customMtu ?: 1380} • ${preset.customTcpBufferKb ?: 512}KB Buffer",
+                                            text = "${throughputStr}MTU ${preset.customMtu ?: 1380} • ${preset.customTcpBufferKb ?: 512}KB",
                                             fontSize = 9.sp,
                                             fontFamily = FontFamily.Monospace,
                                             color = Color(0xFF64748B)
