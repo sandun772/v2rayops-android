@@ -57,12 +57,13 @@ import kotlin.math.sin
 @Composable
 fun ConcentricRadarDial(
     connectionState: ConnectionState,
+    isSmartHunting: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val isConnected = connectionState.isConnected
-    val isConnecting = connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+    val isConnected = connectionState.isConnected && !isSmartHunting
+    val isConnecting = isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
     // Colors matching reference mockups
     val connectedBorder = Color(0xFF6366F1)     // Electric Indigo

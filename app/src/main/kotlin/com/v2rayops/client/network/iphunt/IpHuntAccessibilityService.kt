@@ -1,8 +1,12 @@
 package com.v2rayops.client.network.iphunt
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
+import android.graphics.Path
+import android.graphics.Rect
+import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -50,6 +54,12 @@ class IpHuntAccessibilityService : AccessibilityService() {
         }
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        AppLogger.i("IpHuntAccessibility", "V2RayOps Auto-Pilot Accessibility Service created.")
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -57,7 +67,7 @@ class IpHuntAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // No-op: Active polling loop in performAutoToggleCycle handles window state precisely
+        // Handled directly via polling loop in performAutoToggleCycle
     }
 
     override fun onInterrupt() {
@@ -78,12 +88,11 @@ class IpHuntAccessibilityService : AccessibilityService() {
 
     /**
      * Executes one complete automated Airplane Mode toggle cycle:
-     * 1. Launches Airplane Mode Settings directly (NO notification bar swiping)
-     * 2. Finds the hardware toggle switch
-     * 3. Clicks to turn Airplane Mode ON and verifies with Settings.Global
-     * 4. Waits 1.6s for carrier tower disconnection
-     * 5. Clicks to turn Airplane Mode OFF and verifies with Settings.Global
-     * 6. Smoothly brings V2RayOps back to the front
+     * 1. Opens Settings and navigates directly to Airplane Mode
+     * 2. Toggles Airplane Mode ON (confirmed via Settings.Global)
+     * 3. Waits 1.6s for carrier tower disconnection
+     * 4. Toggles Airplane Mode OFF (confirmed via Settings.Global)
+     * 5. Smoothly returns to V2RayOps
      */
     fun performAutoToggleCycle(onDone: (Boolean) -> Unit) {
         activeCycleJob?.cancel()
@@ -102,73 +111,250 @@ class IpHuntAccessibilityService : AccessibilityService() {
     }
 
     private suspend fun executeDirectSettingsToggle(): Boolean {
-        // Step 1: Launch Airplane Mode Settings directly
+        // Step 1: Launch Settings (Action Airplane Mode Settings)
         val intent = Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         startActivity(intent)
 
-        // Step 2: Poll for switch node on Settings screen (up to 3 seconds)
-        var toggleNode: AccessibilityNodeInfo? = null
+        delay(400)
+
+        // Step 2: Check current screen. If on Homepage (Vivo, Samsung, etc.), navigate into network category
+        navigateIntoAirplaneSettingsIfNeeded()
+
+        // Step 3: Locate the Airplane Mode Switch node and its screen bounds
+        var switchNode: AccessibilityNodeInfo? = null
+        var switchBounds = Rect()
+
         val searchStart = System.currentTimeMillis()
-        while (System.currentTimeMillis() - searchStart < 3000L) {
+        while (System.currentTimeMillis() - searchStart < 3500L) {
+            val root = rootInActiveWindow
+            if (root != null) {
+                val found = findAirplaneSwitchAndBounds(root)
+                if (found != null) {
+                    switchNode = found.first
+                    switchBounds = found.second
+                    break
+                }
+            }
             delay(150)
-            val root = rootInActiveWindow ?: continue
-            toggleNode = findAirplaneToggleNode(root)
-            if (toggleNode != null) break
         }
 
-        if (toggleNode == null) {
-            AppLogger.w("IpHuntAccessibility", "Could not locate Airplane toggle switch on settings screen")
+        if (switchNode == null || switchBounds.isEmpty) {
+            AppLogger.w("IpHuntAccessibility", "Could not locate Airplane Mode switch on settings screen")
             bringV2RayOpsToFront()
             return false
         }
 
-        // Step 3: Turn Airplane Mode ON if not already ON
-        if (!isAirplaneModeOn(this)) {
-            AppLogger.d("IpHuntAccessibility", "Clicking toggle switch to turn Airplane Mode ON...")
-            performClick(toggleNode)
+        AppLogger.i("IpHuntAccessibility", "Target switch found at bounds $switchBounds. Current airplane status: ${isAirplaneModeOn(this)}")
 
-            // Confirm hardware status changed to ON (poll up to 1.2s)
+        // Step 4: Toggle Airplane Mode ON
+        if (!isAirplaneModeOn(this)) {
+            AppLogger.d("IpHuntAccessibility", "Toggling Airplane Mode ON...")
+            clickSwitch(switchNode, switchBounds)
+
+            // Verify hardware state changed to ON
             val onStart = System.currentTimeMillis()
-            while (!isAirplaneModeOn(this) && System.currentTimeMillis() - onStart < 1200L) {
+            while (!isAirplaneModeOn(this) && System.currentTimeMillis() - onStart < 1500L) {
                 delay(150)
-                val freshRoot = rootInActiveWindow
-                if (freshRoot != null) {
-                    val freshNode = findAirplaneToggleNode(freshRoot)
-                    performClick(freshNode)
+                clickSwitch(switchNode, switchBounds)
+            }
+        }
+
+        val turnedOn = isAirplaneModeOn(this)
+        AppLogger.i("IpHuntAccessibility", "Airplane Mode ON confirmed: $turnedOn")
+
+        // Step 5: Hold in Airplane Mode for 1.6s so mobile network detaches from tower
+        delay(1600)
+
+        // Step 6: Toggle Airplane Mode OFF
+        AppLogger.d("IpHuntAccessibility", "Toggling Airplane Mode OFF...")
+        val freshRoot = rootInActiveWindow
+        val freshSwitch = if (freshRoot != null) findAirplaneSwitchAndBounds(freshRoot) else null
+        val offNode = freshSwitch?.first ?: switchNode
+        val offBounds = freshSwitch?.second ?: switchBounds
+
+        clickSwitch(offNode, offBounds)
+
+        // Verify hardware state changed to OFF
+        val offStart = System.currentTimeMillis()
+        while (isAirplaneModeOn(this) && System.currentTimeMillis() - offStart < 1500L) {
+            delay(150)
+            clickSwitch(offNode, offBounds)
+        }
+
+        val turnedOff = !isAirplaneModeOn(this)
+        AppLogger.i("IpHuntAccessibility", "Airplane Mode OFF confirmed: $turnedOff")
+
+        delay(350)
+        // Step 7: Return smoothly to V2RayOps
+        bringV2RayOpsToFront()
+
+        return turnedOff
+    }
+
+    private suspend fun navigateIntoAirplaneSettingsIfNeeded() {
+        val root = rootInActiveWindow ?: return
+
+        // If Airplane mode text is already visible on screen, we're already on the right page
+        val hasAirplaneDirectly = root.findAccessibilityNodeInfosByText("Airplane mode").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("Flight mode").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByText("Airplane").isNotEmpty()
+        if (hasAirplaneDirectly) return
+
+        // Search for intermediate network category tiles
+        val categoryKeywords = listOf(
+            "Other networks and connections",
+            "Connections",
+            "Network & internet",
+            "Wireless & networks",
+            "Connection & sharing",
+            "Mobile network"
+        )
+
+        for (kw in categoryKeywords) {
+            val nodes = root.findAccessibilityNodeInfosByText(kw)
+            for (node in nodes) {
+                // Find clickable ancestor
+                var clickableParent: AccessibilityNodeInfo? = node
+                while (clickableParent != null && !clickableParent.isClickable) {
+                    clickableParent = clickableParent.parent
+                }
+                if (clickableParent != null && clickableParent.isClickable) {
+                    AppLogger.d("IpHuntAccessibility", "Clicking intermediate category: $kw")
+                    clickableParent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    delay(450)
+                    return
+                } else {
+                    // Try gesture click on node bounds center
+                    val rect = Rect()
+                    node.getBoundsInScreen(rect)
+                    if (!rect.isEmpty) {
+                        AppLogger.d("IpHuntAccessibility", "Tapping bounds center for: $kw")
+                        dispatchTouchTap(rect.centerX().toFloat(), rect.centerY().toFloat())
+                        delay(450)
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Finds the Airplane Mode switch and its exact screen bounds:
+     * - Looks for "Airplane mode" / "Flight mode" row, then finds the Switch widget on that row
+     * - Also checks direct switch IDs (android:id/checkbox on Vivo, switch_widget on AOSP, etc.)
+     */
+    private fun findAirplaneSwitchAndBounds(root: AccessibilityNodeInfo): Pair<AccessibilityNodeInfo, Rect>? {
+        // Strategy A: Find row with text "Airplane mode" / "Flight mode"
+        val keywords = listOf("Airplane mode", "Flight mode", "Airplane", "Flight")
+        for (kw in keywords) {
+            val textNodes = root.findAccessibilityNodeInfosByText(kw)
+            for (tn in textNodes) {
+                val rowRect = Rect()
+                tn.getBoundsInScreen(rowRect)
+
+                // Search siblings/ancestors for switch
+                var parent: AccessibilityNodeInfo? = tn
+                for (depth in 0..4) {
+                    parent = parent?.parent ?: break
+                    val count = parent.childCount
+                    for (i in 0 until count) {
+                        val child = parent.getChild(i) ?: continue
+                        val cName = child.className?.toString() ?: ""
+                        if (child.isCheckable || cName.contains("Switch") || cName.contains("CompoundButton") || child.viewIdResourceName?.contains("checkbox") == true) {
+                            val rect = Rect()
+                            child.getBoundsInScreen(rect)
+                            if (!rect.isEmpty) return Pair(child, rect)
+                        }
+                    }
+                }
+
+                // If switch was in separate layout container on the right side of the row (e.g. Vivo Funtouch OS)
+                // Search all switches on screen that share the same vertical Y coordinate range
+                val allSwitches = findAllSwitches(root)
+                for (s in allSwitches) {
+                    val sRect = Rect()
+                    s.getBoundsInScreen(sRect)
+                    if (sRect.top >= rowRect.top - 60 && sRect.bottom <= rowRect.bottom + 60) {
+                        return Pair(s, sRect)
+                    }
                 }
             }
         }
 
-        AppLogger.d("IpHuntAccessibility", "Airplane Mode is ON. Waiting 1.6s for cell tower detachment...")
-        // Step 4: Hold in Airplane Mode for 1.6s
-        delay(1600)
-
-        // Step 5: Turn Airplane Mode OFF
-        AppLogger.d("IpHuntAccessibility", "Clicking toggle switch to turn Airplane Mode OFF...")
-        val offRoot = rootInActiveWindow
-        val offNode = if (offRoot != null) findAirplaneToggleNode(offRoot) else toggleNode
-        performClick(offNode)
-
-        // Confirm hardware status changed to OFF (poll up to 1.2s)
-        val offStart = System.currentTimeMillis()
-        while (isAirplaneModeOn(this) && System.currentTimeMillis() - offStart < 1200L) {
-            delay(150)
-            val freshRoot = rootInActiveWindow
-            if (freshRoot != null) {
-                val freshNode = findAirplaneToggleNode(freshRoot)
-                performClick(freshNode)
+        // Strategy B: Direct ID search (Vivo uses android:id/checkbox, AOSP uses switch_widget)
+        val knownIds = listOf(
+            "android:id/checkbox",
+            "android:id/switch_widget",
+            "com.android.settings:id/switch_widget",
+            "com.android.settings:id/switch_button",
+            "com.android.settings:id/main_switch",
+            "com.android.settings:id/main_switch_button"
+        )
+        for (id in knownIds) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            if (nodes.isNotEmpty()) {
+                val first = nodes.first()
+                val rect = Rect()
+                first.getBoundsInScreen(rect)
+                if (!rect.isEmpty) return Pair(first, rect)
             }
         }
 
-        delay(300)
-        // Step 6: Bring V2RayOps back
-        bringV2RayOpsToFront()
+        // Strategy C: First checkable switch on screen
+        val anySwitches = findAllSwitches(root)
+        if (anySwitches.isNotEmpty()) {
+            val first = anySwitches.first()
+            val rect = Rect()
+            first.getBoundsInScreen(rect)
+            if (!rect.isEmpty) return Pair(first, rect)
+        }
 
-        val isNowOff = !isAirplaneModeOn(this)
-        AppLogger.i("IpHuntAccessibility", "Toggle cycle finished. Radio re-enabled: $isNowOff")
-        return isNowOff
+        return null
+    }
+
+    private fun findAllSwitches(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val result = mutableListOf<AccessibilityNodeInfo>()
+        fun traverse(node: AccessibilityNodeInfo?) {
+            if (node == null) return
+            val cName = node.className?.toString() ?: ""
+            val id = node.viewIdResourceName ?: ""
+            if (node.isCheckable || cName.contains("Switch") || id.contains("checkbox") || id.contains("switch")) {
+                result.add(node)
+            }
+            for (i in 0 until node.childCount) {
+                traverse(node.getChild(i))
+            }
+        }
+        traverse(root)
+        return result
+    }
+
+    private fun clickSwitch(node: AccessibilityNodeInfo, bounds: Rect) {
+        // 1. Try standard Accessibility action
+        val actionSuccess = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (!actionSuccess && node.parent != null) {
+            node.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+
+        // 2. Also dispatch physical touch gesture to the exact center coordinates of the switch
+        if (!bounds.isEmpty) {
+            dispatchTouchTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+        }
+    }
+
+    private fun dispatchTouchTap(x: Float, y: Float) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val path = Path().apply { moveTo(x, y) }
+                val stroke = GestureDescription.StrokeDescription(path, 0, 50)
+                val gesture = GestureDescription.Builder().addStroke(stroke).build()
+                dispatchGesture(gesture, null, null)
+            } catch (e: Exception) {
+                AppLogger.w("IpHuntAccessibility", "dispatchGesture failed: ${e.message}")
+            }
+        }
     }
 
     private fun bringV2RayOpsToFront() {
@@ -180,94 +366,5 @@ class IpHuntAccessibilityService : AccessibilityService() {
         } catch (_: Exception) {
             performGlobalAction(GLOBAL_ACTION_BACK)
         }
-    }
-
-    private fun performClick(node: AccessibilityNodeInfo?): Boolean {
-        if (node == null) return false
-
-        // Attempt 1: Direct action click
-        if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            return true
-        }
-
-        // Attempt 2: Click parent container
-        var parent = node.parent
-        while (parent != null) {
-            if (parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                return true
-            }
-            parent = parent.parent
-        }
-
-        // Attempt 3: Force ACTION_CLICK on node even if not marked clickable
-        if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            return true
-        }
-
-        return false
-    }
-
-    private fun findAirplaneToggleNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        // Strategy 1: Standard Android Settings switch IDs
-        val knownIds = listOf(
-            "android:id/switch_widget",
-            "android:id/switch1",
-            "com.android.settings:id/switch_widget",
-            "com.android.settings:id/switch_button",
-            "com.android.settings:id/airplane_mode",
-            "com.android.settings:id/main_switch",
-            "com.android.settings:id/main_switch_button",
-            "com.android.settings:id/switch_bar"
-        )
-        for (id in knownIds) {
-            try {
-                val nodes = root.findAccessibilityNodeInfosByViewId(id)
-                for (n in nodes) {
-                    if (n.isClickable || n.isCheckable) return n
-                    n.parent?.let { if (it.isClickable) return it }
-                }
-            } catch (_: Exception) {}
-        }
-
-        // Strategy 2: Text keyword search
-        val keywords = listOf("airplane", "flight", "aeroplane")
-        for (kw in keywords) {
-            try {
-                val textNodes = root.findAccessibilityNodeInfosByText(kw)
-                for (tn in textNodes) {
-                    if (tn.isCheckable) return tn
-
-                    // Check parents and children of row
-                    var p: AccessibilityNodeInfo? = tn
-                    for (level in 0..3) {
-                        p = p?.parent ?: break
-                        if (p.isClickable) return p
-                        for (i in 0 until p.childCount) {
-                            val c = p.getChild(i) ?: continue
-                            val className = c.className?.toString() ?: ""
-                            if (c.isCheckable || className.contains("Switch") || className.contains("CompoundButton")) {
-                                return c
-                            }
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
-        }
-
-        // Strategy 3: Find first checkable switch on the Airplane Settings screen
-        fun findFirstCheckable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-            if (node == null) return null
-            val className = node.className?.toString() ?: ""
-            if (node.isCheckable || className.contains("Switch") || className.contains("CompoundButton")) {
-                return node
-            }
-            for (i in 0 until node.childCount) {
-                val found = findFirstCheckable(node.getChild(i))
-                if (found != null) return found
-            }
-            return null
-        }
-
-        return findFirstCheckable(root)
     }
 }

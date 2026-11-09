@@ -185,6 +185,11 @@ class IpHuntManager @Inject constructor(
         )
     }
 
+    suspend fun executeSingleAutoCycle(): Boolean {
+        refreshAutomationCapabilities()
+        return executeAutoAirplaneToggle()
+    }
+
     /**
      * Executes automatic airplane mode toggle cycle using the highest available privilege tier:
      * - Tier 1: Root command (su) -> background silent
@@ -205,7 +210,15 @@ class IpHuntManager @Inject constructor(
         }
 
         // Tier 3: Accessibility Service (For unrooted devices)
-        val accessibilityService = IpHuntAccessibilityService.instance
+        var accessibilityService = IpHuntAccessibilityService.instance
+        if (accessibilityService == null && IpHuntAccessibilityService.isAccessibilityEnabled(context)) {
+            for (i in 0 until 10) {
+                delay(100)
+                accessibilityService = IpHuntAccessibilityService.instance
+                if (accessibilityService != null) break
+            }
+        }
+
         if (accessibilityService != null) {
             AppLogger.d("IpHuntManager", "Triggering Accessibility Service automated toggle...")
             return suspendCancellableCoroutine { cont ->
@@ -247,18 +260,22 @@ class IpHuntManager @Inject constructor(
     private suspend fun executeSecureSettingsToggle(): Boolean = withContext(dispatchers.io) {
         try {
             Settings.Global.putInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 1)
-            val onIntent = Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED).apply {
-                putExtra("state", true)
-            }
-            context.sendBroadcast(onIntent)
+            try {
+                val onIntent = Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED).apply {
+                    putExtra("state", true)
+                }
+                context.sendBroadcast(onIntent)
+            } catch (_: Exception) {}
 
             delay(1500)
 
             Settings.Global.putInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0)
-            val offIntent = Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED).apply {
-                putExtra("state", false)
-            }
-            context.sendBroadcast(offIntent)
+            try {
+                val offIntent = Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED).apply {
+                    putExtra("state", false)
+                }
+                context.sendBroadcast(offIntent)
+            } catch (_: Exception) {}
             true
         } catch (_: Exception) {
             false

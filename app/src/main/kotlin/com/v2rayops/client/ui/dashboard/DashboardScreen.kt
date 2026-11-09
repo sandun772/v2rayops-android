@@ -2,6 +2,7 @@ package com.v2rayops.client.ui.dashboard
 
 import android.app.Activity
 import android.net.VpnService
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -56,7 +57,6 @@ import com.v2rayops.client.ui.dashboard.components.ClientNavTab
 import com.v2rayops.client.ui.dashboard.components.ConcentricRadarDial
 import com.v2rayops.client.ui.dashboard.components.DigitalTimerText
 import com.v2rayops.client.ui.dashboard.components.HiddenSpeedStabilityWidget
-import com.v2rayops.client.ui.dashboard.components.IpHuntCockpitDialog
 import com.v2rayops.client.ui.dashboard.components.ProxyModeSelector
 import com.v2rayops.client.ui.dashboard.components.PullDownChargingPill
 import com.v2rayops.client.ui.dashboard.components.SpeedDividedSection
@@ -93,7 +93,8 @@ fun DashboardScreen(
     }
     var showUsageCockpit by remember { mutableStateOf(false) }
     val ipHuntState by viewModel.ipHuntState.collectAsState()
-    var showIpHuntDialog by remember { mutableStateOf(false) }
+    val isSmartHunting by viewModel.isSmartHunting.collectAsState()
+    var pendingSmartHuntAction by remember { mutableStateOf(false) }
 
     var pullDistance by remember { mutableFloatStateOf(0f) }
     var isCharging by remember { mutableStateOf(false) }
@@ -171,16 +172,44 @@ fun DashboardScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.onConnectToggle()
+            if (pendingSmartHuntAction) {
+                pendingSmartHuntAction = false
+                viewModel.startSmartConnectHunt()
+            } else {
+                viewModel.onConnectToggle()
+            }
+        } else {
+            pendingSmartHuntAction = false
         }
     }
 
     val handleConnectClick = {
-        val prepareIntent = VpnService.prepare(context)
-        if (prepareIntent != null) {
-            vpnPrepareLauncher.launch(prepareIntent)
+        if (isSmartHunting) {
+            viewModel.stopSmartConnectHunt()
         } else {
-            viewModel.onConnectToggle()
+            pendingSmartHuntAction = false
+            val prepareIntent = VpnService.prepare(context)
+            if (prepareIntent != null) {
+                vpnPrepareLauncher.launch(prepareIntent)
+            } else {
+                viewModel.onConnectToggle()
+            }
+        }
+    }
+
+    val handleStartSmartHunt = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (!ipHuntState.isFullyAutomated) {
+            Toast.makeText(context, "Please enable V2RayOps in Accessibility Settings to automate IP Hunting", Toast.LENGTH_LONG).show()
+            viewModel.openAccessibilitySettings(context)
+        } else {
+            val prepareIntent = VpnService.prepare(context)
+            if (prepareIntent != null) {
+                pendingSmartHuntAction = true
+                vpnPrepareLauncher.launch(prepareIntent)
+            } else {
+                viewModel.startSmartConnectHunt()
+            }
         }
     }
 
@@ -300,7 +329,10 @@ fun DashboardScreen(
                 }
 
                 // 1. Status Capsule Pill (• DISCONNECTED / • HANDSHAKING / • CONNECTED)
-                StatusPill(connectionState = connectionState)
+                StatusPill(
+                    connectionState = connectionState,
+                    isSmartHunting = isSmartHunting
+                )
 
                 // 2. Big Digital Clock (00:00:00 or 01:24:37)
                 DigitalTimerText(connectionState = connectionState)
@@ -308,11 +340,9 @@ fun DashboardScreen(
                 // 3. Center Concentric Dot Radar Dial (Single tap: normal connect, Hold: IP Hunter)
                 ConcentricRadarDial(
                     connectionState = connectionState,
+                    isSmartHunting = isSmartHunting,
                     onClick = handleConnectClick,
-                    onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showIpHuntDialog = true
-                    }
+                    onLongClick = handleStartSmartHunt
                 )
 
                 // 4. Download / Upload Speed Section with Dividing Lines
@@ -388,34 +418,6 @@ fun DashboardScreen(
                 selectedConfig = selectedConfig,
                 pingMs = realPingMs,
                 onDismiss = { showUsageCockpit = false }
-            )
-        }
-
-        // IP Hunt Mode Cockpit (Triggered on Press & Hold of Center Connect Dial)
-        if (showIpHuntDialog) {
-            IpHuntCockpitDialog(
-                state = ipHuntState,
-                onStartHunt = { target ->
-                    viewModel.startIpHunt(target) { matchedIp ->
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showIpHuntDialog = false
-                        handleConnectClick()
-                    }
-                },
-                onStopHunt = { viewModel.stopIpHunt() },
-                onSetTargetPrefix = { viewModel.setIpHuntTargetPrefix(it) },
-                onOpenAccessibilitySettings = { viewModel.openAccessibilitySettings(context) },
-                onOpenAppPermissionSettings = { viewModel.openAppPermissionSettings(context) },
-                onOpenAirplaneSettings = { viewModel.openAirplaneSettings(context) },
-                onRefreshCapabilities = { viewModel.refreshIpHuntCapabilities() },
-                onConnectNow = {
-                    showIpHuntDialog = false
-                    handleConnectClick()
-                },
-                onDismiss = {
-                    viewModel.stopIpHunt()
-                    showIpHuntDialog = false
-                }
             )
         }
     }

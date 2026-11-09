@@ -3,6 +3,8 @@ package com.v2rayops.client.ui.dashboard
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.v2rayops.client.core.dispatchers.AppDispatchers
+import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.core.result.AppResult
 import com.v2rayops.client.domain.model.ConnectionState
 import com.v2rayops.client.domain.model.TrafficStats
@@ -19,6 +21,7 @@ import com.v2rayops.client.network.iphunt.IpHuntState
 import com.v2rayops.client.ui.dashboard.components.SpeedOptimizationMode
 import com.v2rayops.client.vpn.VpnManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,7 +29,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 data class QuickAuditState(
@@ -49,11 +59,17 @@ class DashboardViewModel @Inject constructor(
     private val vpnManager: VpnManager,
     private val diagnosticsManager: ConnectionDiagnosticsManager,
     private val benchmarkEngine: ThroughputBenchmarkEngine,
-    private val ipHuntManager: IpHuntManager
+    private val ipHuntManager: IpHuntManager,
+    private val dispatchers: AppDispatchers
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
     val trafficStats: StateFlow<TrafficStats> = vpnManager.trafficStats
+
+    // Smart Carrier Hunt & Auto-Connect
+    private var smartHuntJob: Job? = null
+    private val _isSmartHunting = MutableStateFlow(false)
+    val isSmartHunting: StateFlow<Boolean> = _isSmartHunting.asStateFlow()
 
     // IP Hunt Reactive State
     val ipHuntState: StateFlow<IpHuntState> = ipHuntManager.state
@@ -216,6 +232,10 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun onConnectToggle() {
+        if (_isSmartHunting.value) {
+            stopSmartConnectHunt()
+            return
+        }
         val currentState = connectionState.value
         if (currentState.isConnected || currentState.isConnecting) {
             vpnManager.disconnect()
@@ -235,6 +255,156 @@ class DashboardViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Smart Carrier Hunt & Auto-Connect:
+     * When pressed & held on the Connect button, immediately initiates a connection test.
+     * If the VPN fails to connect or doesn't route traffic on the current cellular IP,
+     * it automatically cycles Airplane Mode in background and retries until verified working.
+     */
+    fun startSmartConnectHunt() {
+        stopSmartConnectHunt()
+        _isSmartHunting.value = true
+
+        smartHuntJob = viewModelScope.launch(dispatchers.default) {
+            AppLogger.i("SmartHunt", "Starting Smart Carrier Hunt & Auto-Connect...")
+
+            var cycleCount = 0
+
+            while (isActive && _isSmartHunting.value) {
+                cycleCount++
+
+                // 1. Resolve configuration
+                var config = selectedConfig.value
+                if (config == null) {
+                    val code = authRepository.getSavedCustomerCode()
+                    if (!code.isNullOrBlank()) {
+                        subscriptionRepository.syncConfigs(code)
+                    }
+                    config = selectedConfig.value ?: subscriptionRepository.observeConfigs().first().firstOrNull()
+                }
+
+                if (config == null) {
+                    AppLogger.w("SmartHunt", "No active VPN configuration found. Halting hunt.")
+                    _isSmartHunting.value = false
+                    break
+                }
+
+                // 2. Disconnect any stale session
+                if (connectionState.value.isConnected || connectionState.value.isConnecting) {
+                    vpnManager.disconnect()
+                    delay(300)
+                }
+
+                // 3. Initiate VPN connection (Center dial enters CONNECTING state immediately!)
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Connecting VPN with profile '${config.displayName}'...")
+                vpnManager.connect(config)
+
+                // 4. Wait and verify whether the VPN is genuinely working and passing traffic
+                val isWorking = verifyVpnWorkingWithTimeout(timeoutMs = 4500L)
+
+                if (isWorking) {
+                    AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: VPN is active and passing traffic!")
+                    _isSmartHunting.value = false
+                    break
+                }
+
+                if (!isActive || !_isSmartHunting.value) break
+
+                // 5. VPN not working on this cellular IP -> Disconnect
+                AppLogger.w("SmartHunt", "Cycle #$cycleCount: VPN failed to route traffic. Disconnecting...")
+                vpnManager.disconnect()
+                delay(400)
+
+                // 6. Automatically toggle Airplane Mode ON then OFF
+                AppLogger.i("SmartHunt", "Cycle #$cycleCount: Auto-cycling Airplane Mode to acquire fresh IP...")
+                val toggled = ipHuntManager.executeSingleAutoCycle()
+                if (!toggled) {
+                    AppLogger.w("SmartHunt", "Auto-toggle cycle failed or was interrupted. Retrying...")
+                }
+
+                // 7. Wait for mobile data connection to settle
+                delay(1600)
+            }
+        }
+    }
+
+    fun stopSmartConnectHunt() {
+        smartHuntJob?.cancel()
+        smartHuntJob = null
+        _isSmartHunting.value = false
+        if (connectionState.value.isConnecting) {
+            vpnManager.disconnect()
+        }
+    }
+
+    private suspend fun verifyVpnWorkingWithTimeout(timeoutMs: Long): Boolean = withContext(dispatchers.io) {
+        val start = System.currentTimeMillis()
+        var isTunnelUp = false
+
+        // Phase 1: Wait for VPN Service + Xray core to enter Connected state
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            val state = connectionState.value
+            if (state.isConnected) {
+                isTunnelUp = true
+                break
+            }
+            if (state is ConnectionState.Error) {
+                return@withContext false
+            }
+            delay(200)
+        }
+
+        if (!isTunnelUp) {
+            AppLogger.d("SmartHunt", "VPN did not reach Connected state within timeout")
+            return@withContext false
+        }
+
+        // Phase 2: Probe actual internet data flow through the tunnel
+        delay(400) // Brief grace period for handshake packet exchange
+
+        testTrafficThroughProxy(maxWaitMs = 2500L)
+    }
+
+    private suspend fun testTrafficThroughProxy(maxWaitMs: Long): Boolean = withContext(dispatchers.io) {
+        // Test 1: Check if download bytes already accumulating
+        val initialRx = trafficStats.value.totalDownloadBytes
+        if (initialRx > 2048) {
+            AppLogger.d("SmartHunt", "Tunnel already received $initialRx bytes. Confirmed working.")
+            return@withContext true
+        }
+
+        // Test 2: Fast HTTP 204 probe through local proxy 127.0.0.1:10809
+        try {
+            val client = OkHttpClient.Builder()
+                .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 10809)))
+                .connectTimeout(maxWaitMs, TimeUnit.MILLISECONDS)
+                .readTimeout(maxWaitMs, TimeUnit.MILLISECONDS)
+                .build()
+
+            val request = Request.Builder()
+                .url("http://cp.cloudflare.com/generate_204")
+                .header("User-Agent", "V2RayOps-Client/1.0")
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful || response.code == 204) {
+                AppLogger.d("SmartHunt", "Proxy HTTP 204 probe returned ${response.code}. Tunnel verified!")
+                return@withContext true
+            }
+        } catch (e: Exception) {
+            AppLogger.d("SmartHunt", "Proxy probe failed: ${e.message}")
+        }
+
+        // Final check: did totalDownloadBytes increase during probe?
+        val finalRx = trafficStats.value.totalDownloadBytes
+        if (finalRx > initialRx + 512) {
+            AppLogger.d("SmartHunt", "totalDownloadBytes increased from $initialRx to $finalRx. Tunnel confirmed passing traffic.")
+            return@withContext true
+        }
+
+        false
     }
 
     /**

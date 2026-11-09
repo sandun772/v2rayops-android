@@ -25,12 +25,19 @@ import com.v2rayops.client.domain.model.ConnectionState
 @Composable
 fun StatusPill(
     connectionState: ConnectionState,
+    isSmartHunting: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val isConnected = connectionState.isConnected
-    val isConnecting = connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+    val isConnected = connectionState.isConnected && !isSmartHunting
+    val isConnecting = isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
     val (bg, border, textColor, text) = when {
+        isSmartHunting -> Quadruple(
+            Color(0xFF1E1405),
+            Color(0xFF4A320A),
+            Color(0xFFF59E0B),
+            "HUNTING IP"
+        )
         isConnecting -> Quadruple(
             Color(0xFF1E1405),
             Color(0xFF4A320A),
