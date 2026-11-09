@@ -94,6 +94,7 @@ fun DashboardScreen(
     var showUsageCockpit by remember { mutableStateOf(false) }
     val ipHuntState by viewModel.ipHuntState.collectAsState()
     val isSmartHunting by viewModel.isSmartHunting.collectAsState()
+    val isCyclingAirplane by viewModel.isCyclingAirplaneMode.collectAsState()
     var pendingSmartHuntAction by remember { mutableStateOf(false) }
 
     var pullDistance by remember { mutableFloatStateOf(0f) }
@@ -331,7 +332,8 @@ fun DashboardScreen(
                 // 1. Status Capsule Pill (• DISCONNECTED / • HANDSHAKING / • CONNECTED)
                 StatusPill(
                     connectionState = connectionState,
-                    isSmartHunting = isSmartHunting
+                    isSmartHunting = isSmartHunting,
+                    isCyclingAirplane = isCyclingAirplane
                 )
 
                 // 2. Big Digital Clock (00:00:00 or 01:24:37)
@@ -341,6 +343,7 @@ fun DashboardScreen(
                 ConcentricRadarDial(
                     connectionState = connectionState,
                     isSmartHunting = isSmartHunting,
+                    isCyclingAirplane = isCyclingAirplane,
                     onClick = handleConnectClick,
                     onLongClick = handleStartSmartHunt
                 )

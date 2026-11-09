@@ -71,6 +71,9 @@ class DashboardViewModel @Inject constructor(
     private val _isSmartHunting = MutableStateFlow(false)
     val isSmartHunting: StateFlow<Boolean> = _isSmartHunting.asStateFlow()
 
+    private val _isCyclingAirplaneMode = MutableStateFlow(false)
+    val isCyclingAirplaneMode: StateFlow<Boolean> = _isCyclingAirplaneMode.asStateFlow()
+
     // IP Hunt Reactive State
     val ipHuntState: StateFlow<IpHuntState> = ipHuntManager.state
 
@@ -294,7 +297,12 @@ class DashboardViewModel @Inject constructor(
                 // 2. Safety check: NEVER attempt connection while Airplane Mode is ON!
                 if (ipHuntManager.isAirplaneModeOn()) {
                     AppLogger.w("SmartHunt", "Airplane Mode is ON before cycle #$cycleCount! Turning it OFF first...")
-                    ipHuntManager.executeSingleAutoCycle()
+                    _isCyclingAirplaneMode.value = true
+                    try {
+                        ipHuntManager.executeSingleAutoCycle()
+                    } finally {
+                        _isCyclingAirplaneMode.value = false
+                    }
                 }
 
                 // 3. Actively wait for mobile data connection to settle and stabilize
@@ -302,14 +310,24 @@ class DashboardViewModel @Inject constructor(
                 val isStabilized = ipHuntManager.waitForConnectionStabilization(timeoutMs = 14000L)
                 if (!isStabilized) {
                     AppLogger.w("SmartHunt", "Cycle #$cycleCount: Cellular data failed to stabilize. Cycling Airplane Mode...")
-                    ipHuntManager.executeSingleAutoCycle()
+                    _isCyclingAirplaneMode.value = true
+                    try {
+                        ipHuntManager.executeSingleAutoCycle()
+                    } finally {
+                        _isCyclingAirplaneMode.value = false
+                    }
                     continue
                 }
 
                 // 4. Double check right before connecting: Airplane Mode MUST NOT be ON!
                 if (ipHuntManager.isAirplaneModeOn()) {
                     AppLogger.w("SmartHunt", "Airplane Mode detected ON right before VPN connect. Halting connect attempt.")
-                    ipHuntManager.executeSingleAutoCycle()
+                    _isCyclingAirplaneMode.value = true
+                    try {
+                        ipHuntManager.executeSingleAutoCycle()
+                    } finally {
+                        _isCyclingAirplaneMode.value = false
+                    }
                     continue
                 }
 
@@ -331,6 +349,7 @@ class DashboardViewModel @Inject constructor(
                 if (isWorking) {
                     AppLogger.i("SmartHunt", "SUCCESS on Cycle #$cycleCount: VPN is active and passing traffic on IP $currentIp!")
                     _isSmartHunting.value = false
+                    _isCyclingAirplaneMode.value = false
                     break
                 }
 
@@ -343,7 +362,12 @@ class DashboardViewModel @Inject constructor(
 
                 // 9. Automatically toggle Airplane Mode ON then OFF to acquire fresh carrier IP
                 AppLogger.i("SmartHunt", "Cycle #$cycleCount: Auto-cycling Airplane Mode to acquire fresh IP...")
-                val toggled = ipHuntManager.executeSingleAutoCycle()
+                _isCyclingAirplaneMode.value = true
+                val toggled = try {
+                    ipHuntManager.executeSingleAutoCycle()
+                } finally {
+                    _isCyclingAirplaneMode.value = false
+                }
                 if (!toggled) {
                     AppLogger.w("SmartHunt", "Auto-toggle cycle returned false. Verifying airplane mode state...")
                 }
@@ -355,6 +379,7 @@ class DashboardViewModel @Inject constructor(
         smartHuntJob?.cancel()
         smartHuntJob = null
         _isSmartHunting.value = false
+        _isCyclingAirplaneMode.value = false
         if (connectionState.value.isConnecting) {
             vpnManager.disconnect()
         }

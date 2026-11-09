@@ -26,12 +26,19 @@ import com.v2rayops.client.domain.model.ConnectionState
 fun StatusPill(
     connectionState: ConnectionState,
     isSmartHunting: Boolean = false,
+    isCyclingAirplane: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val isConnected = connectionState.isConnected && !isSmartHunting
-    val isConnecting = isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+    val isConnected = connectionState.isConnected && !isSmartHunting && !isCyclingAirplane
+    val isConnecting = isCyclingAirplane || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
     val (bg, border, textColor, text) = when {
+        isCyclingAirplane -> Quadruple(
+            Color(0xFF240A12),
+            Color(0xFF5E1B2C),
+            Color(0xFFFB7185),
+            "CYCLING AIRPLANE"
+        )
         isSmartHunting -> Quadruple(
             Color(0xFF1E1405),
             Color(0xFF4A320A),

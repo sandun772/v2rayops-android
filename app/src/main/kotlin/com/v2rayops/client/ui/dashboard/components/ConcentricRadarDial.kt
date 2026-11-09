@@ -7,6 +7,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -58,12 +59,13 @@ import kotlin.math.sin
 fun ConcentricRadarDial(
     connectionState: ConnectionState,
     isSmartHunting: Boolean = false,
+    isCyclingAirplane: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val isConnected = connectionState.isConnected && !isSmartHunting
-    val isConnecting = isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
+    val isConnected = connectionState.isConnected && !isSmartHunting && !isCyclingAirplane
+    val isConnecting = isCyclingAirplane || isSmartHunting || connectionState.isConnecting || connectionState is ConnectionState.Disconnecting
 
     // Colors matching reference mockups
     val connectedBorder = Color(0xFF6366F1)     // Electric Indigo
@@ -74,12 +76,16 @@ fun ConcentricRadarDial(
     val connectingIcon = Color(0xFFF59E0B)
     val connectingDot = Color(0xFFF59E0B)
 
+    val cyclingBorder = Color(0xFFFB7185)       // Radiant Coral Rose
+    val cyclingIcon = Color(0xFFFB7185)
+
     val disconnectedBorder = Color(0xFF232E44)  // Steel Slate Navy
     val disconnectedIcon = Color(0xFF6B7A99)    // Muted Steel Slate
     val disconnectedDot = Color(0xFF1E283D)
 
     // Smoothly animated transition between states
     val targetBorder = when {
+        isCyclingAirplane -> cyclingBorder
         isConnected -> connectedBorder
         isConnecting -> connectingBorder
         else -> disconnectedBorder
@@ -91,6 +97,7 @@ fun ConcentricRadarDial(
     )
 
     val targetIcon = when {
+        isCyclingAirplane -> cyclingIcon
         isConnected -> connectedIcon
         isConnecting -> connectingIcon
         else -> disconnectedIcon
@@ -129,8 +136,27 @@ fun ConcentricRadarDial(
         label = "StateProgress"
     )
 
-    // Gentle ambient breathing (calm, subtle, professional)
+    // Transitions for radar animations
     val infiniteTransition = rememberInfiniteTransition(label = "RadarMotion")
+
+    // Dual-peak ECG Heartbeat Wave (lub-dub rhythm) active when cycling/turning on Airplane Mode
+    val heartbeatProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1100 // 1.1s physiological heartbeat cycle
+                0.0f at 0 with FastOutSlowInEasing
+                1.0f at 160 with FastOutSlowInEasing     // Systolic thump (LUB)
+                0.15f at 300 with FastOutSlowInEasing    // Contraction
+                0.75f at 430 with FastOutSlowInEasing    // Diastolic thump (DUB)
+                0.0f at 600 with FastOutSlowInEasing     // Return to rest
+                0.0f at 1100 with LinearEasing
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "HeartbeatPulse"
+    )
 
     val breathMultiplier by infiniteTransition.animateFloat(
         initialValue = 0.90f,
@@ -239,7 +265,25 @@ fun ConcentricRadarDial(
                         // Staggered cascade wave for state transition
                         val ringCascade = ((stateProgress - (i * 0.09f)) / 0.50f).coerceIn(0f, 1f)
 
+                        // Outward cascading heartbeat pulse across concentric rings
+                        val ringHeartbeat = if (isCyclingAirplane) {
+                            val delayFraction = i * 0.07f
+                            ((heartbeatProgress - delayFraction) / (1f - delayFraction)).coerceIn(0f, 1f)
+                        } else 0f
+
+                        // Dynamic dot radius: expands with heartbeat pulse
+                        val currentDotRadius = if (isCyclingAirplane) {
+                            dotRadiusPx * (1f + ringHeartbeat * 0.85f)
+                        } else {
+                            dotRadiusPx
+                        }
+
                         val dotAlpha = when {
+                            isCyclingAirplane -> {
+                                val base = 0.35f * baseFalloff
+                                val surge = ringHeartbeat * 0.65f
+                                (base + surge).coerceIn(0.16f, 0.98f)
+                            }
                             isConnected -> {
                                 val activeAlpha = 0.75f * baseFalloff * breathMultiplier
                                 val idleAlpha = 0.28f * baseFalloff
@@ -255,14 +299,25 @@ fun ConcentricRadarDial(
                             }
                         }
 
+                        // Radiant dot gradient: Inner rings Coral Rose (#FB7185) -> Outer rings Cyber Amber (#F59E0B)
+                        val ringDotColor = if (isCyclingAirplane) {
+                            val t = normalizedRing
+                            val r = (0xFB * (1 - t) + 0xF5 * t) / 255f
+                            val g = (0x71 * (1 - t) + 0x9E * t) / 255f
+                            val b = (0x85 * (1 - t) + 0x0B * t) / 255f
+                            Color(r, g, b, 1f)
+                        } else {
+                            animatedDotColor
+                        }
+
                         for (j in 0 until count) {
                             val angle = j * angleStep
                             val x = cx + radius * cos(angle).toFloat()
                             val y = cy + radius * sin(angle).toFloat()
 
                             drawCircle(
-                                color = animatedDotColor.copy(alpha = dotAlpha),
-                                radius = dotRadiusPx,
+                                color = ringDotColor.copy(alpha = dotAlpha),
+                                radius = currentDotRadius,
                                 center = Offset(x, y)
                             )
                         }

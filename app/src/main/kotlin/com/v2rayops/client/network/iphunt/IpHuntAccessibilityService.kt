@@ -99,7 +99,14 @@ class IpHuntAccessibilityService : AccessibilityService() {
         activeCycleJob = serviceScope.launch {
             var cycleSuccess = false
             try {
+                // Tier 1: Try direct Settings activity drill-down
                 cycleSuccess = executeDirectSettingsToggle()
+
+                // Tier 2: If Settings toggle failed, fallback immediately to Quick Settings tile
+                if (!cycleSuccess) {
+                    AppLogger.w("IpHuntAccessibility", "Settings toggle did not turn on Airplane Mode, attempting Quick Settings tile fallback...")
+                    cycleSuccess = tryQuickSettingsToggle()
+                }
             } catch (e: Exception) {
                 AppLogger.e("IpHuntAccessibility", "Error during auto toggle cycle: ${e.message}")
             } finally {
@@ -119,22 +126,28 @@ class IpHuntAccessibilityService : AccessibilityService() {
 
         delay(400)
 
-        // Step 2: Check current screen. If on Homepage (Vivo, Samsung, etc.), navigate into network category
-        navigateIntoAirplaneSettingsIfNeeded()
-
-        // Step 3: Locate the Airplane Mode Switch node and its screen bounds
+        // Step 2: Locate the Airplane Mode Switch node, drilling down into intermediate categories if on Homepage
         var switchNode: AccessibilityNodeInfo? = null
         var switchBounds = Rect()
 
         val searchStart = System.currentTimeMillis()
-        while (System.currentTimeMillis() - searchStart < 3500L) {
+        while (System.currentTimeMillis() - searchStart < 4500L) {
             val root = rootInActiveWindow
             if (root != null) {
                 val found = findAirplaneSwitchAndBounds(root)
                 if (found != null) {
                     switchNode = found.first
                     switchBounds = found.second
+                    AppLogger.i("IpHuntAccessibility", "Located Airplane Mode switch at $switchBounds")
                     break
+                }
+
+                // If no switch was found on this window, we may be on Settings Homepage (Vivo / Samsung / MIUI).
+                // Drill down by clicking intermediate network category
+                val clickedCategory = clickNetworkCategoryIfPresent(root)
+                if (clickedCategory) {
+                    delay(500) // Allow subpage to load
+                    continue
                 }
             }
             delay(150)
@@ -142,13 +155,12 @@ class IpHuntAccessibilityService : AccessibilityService() {
 
         if (switchNode == null || switchBounds.isEmpty) {
             AppLogger.w("IpHuntAccessibility", "Could not locate Airplane Mode switch on settings screen")
-            bringV2RayOpsToFront()
             return false
         }
 
         AppLogger.i("IpHuntAccessibility", "Target switch found at bounds $switchBounds. Current airplane status: ${isAirplaneModeOn(this)}")
 
-        // Step 4: Toggle Airplane Mode ON (only if currently OFF)
+        // Step 3: Toggle Airplane Mode ON (only if currently OFF)
         if (!isAirplaneModeOn(this)) {
             AppLogger.d("IpHuntAccessibility", "Toggling Airplane Mode ON...")
             clickSwitch(switchNode, switchBounds)
@@ -172,11 +184,15 @@ class IpHuntAccessibilityService : AccessibilityService() {
 
         val turnedOn = isAirplaneModeOn(this)
         AppLogger.i("IpHuntAccessibility", "Airplane Mode ON confirmed: $turnedOn")
+        if (!turnedOn) {
+            AppLogger.w("IpHuntAccessibility", "Failed to turn Airplane Mode ON via Settings.")
+            return false
+        }
 
-        // Step 5: Hold in Airplane Mode for 2.0s so mobile network fully detaches from tower
+        // Step 4: Hold in Airplane Mode for 2.0s so mobile network fully detaches from tower
         delay(2000)
 
-        // Step 6: Toggle Airplane Mode OFF
+        // Step 5: Toggle Airplane Mode OFF
         AppLogger.d("IpHuntAccessibility", "Toggling Airplane Mode OFF...")
         val freshRoot = rootInActiveWindow
         val freshSwitch = if (freshRoot != null) findAirplaneSwitchAndBounds(freshRoot) else null
@@ -215,27 +231,118 @@ class IpHuntAccessibilityService : AccessibilityService() {
         AppLogger.i("IpHuntAccessibility", "Airplane Mode OFF confirmed: $turnedOff")
 
         delay(400)
-        // Step 7: Return smoothly to V2RayOps
+        // Step 6: Return smoothly to V2RayOps
         bringV2RayOpsToFront()
 
         return turnedOff
     }
 
-    private suspend fun navigateIntoAirplaneSettingsIfNeeded() {
-        val root = rootInActiveWindow ?: return
+    private suspend fun tryQuickSettingsToggle(): Boolean {
+        AppLogger.i("IpHuntAccessibility", "Attempting Quick Settings tile toggle fallback...")
+        val opened = performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+        if (!opened) return false
 
-        // If Airplane mode text is already visible on screen, we're already on the right page
-        val hasAirplaneDirectly = root.findAccessibilityNodeInfosByText("Airplane mode").isNotEmpty() ||
-                root.findAccessibilityNodeInfosByText("Flight mode").isNotEmpty() ||
-                root.findAccessibilityNodeInfosByText("Airplane").isNotEmpty()
-        if (hasAirplaneDirectly) return
+        delay(700) // Wait for notification shade expansion animation
 
-        // Search for intermediate network category tiles
+        val root = rootInActiveWindow ?: return false
+        val tile = findQuickSettingsAirplaneTile(root)
+        if (tile == null) {
+            AppLogger.w("IpHuntAccessibility", "Quick Settings tile not found")
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            bringV2RayOpsToFront()
+            return false
+        }
+
+        val tileBounds = Rect()
+        tile.getBoundsInScreen(tileBounds)
+
+        // 1. Toggle ON
+        if (!isAirplaneModeOn(this)) {
+            AppLogger.d("IpHuntAccessibility", "Clicking Quick Settings Airplane tile ON...")
+            clickSwitch(tile, tileBounds)
+            val onStart = System.currentTimeMillis()
+            while (!isAirplaneModeOn(this) && System.currentTimeMillis() - onStart < 2500L) {
+                delay(200)
+            }
+        }
+
+        val isNowOn = isAirplaneModeOn(this)
+        AppLogger.i("IpHuntAccessibility", "Quick Settings Airplane ON: $isNowOn")
+        if (!isNowOn) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            bringV2RayOpsToFront()
+            return false
+        }
+
+        // 2. Hold in Airplane Mode
+        delay(2000)
+
+        // 3. Toggle OFF
+        val freshRoot = rootInActiveWindow
+        val freshTile = if (freshRoot != null) findQuickSettingsAirplaneTile(freshRoot) else tile
+        val offTile = freshTile ?: tile
+        val offBounds = Rect().apply { offTile.getBoundsInScreen(this) }
+
+        AppLogger.d("IpHuntAccessibility", "Clicking Quick Settings Airplane tile OFF...")
+        clickSwitch(offTile, offBounds)
+        val offStart = System.currentTimeMillis()
+        while (isAirplaneModeOn(this) && System.currentTimeMillis() - offStart < 2500L) {
+            delay(200)
+        }
+
+        val isNowOff = !isAirplaneModeOn(this)
+        AppLogger.i("IpHuntAccessibility", "Quick Settings Airplane OFF: $isNowOff")
+
+        delay(300)
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        bringV2RayOpsToFront()
+        return isNowOff
+    }
+
+    private fun findQuickSettingsAirplaneTile(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val keywords = listOf("airplane", "flight", "aeroplane")
+        for (kw in keywords) {
+            val textNodes = root.findAccessibilityNodeInfosByText(kw)
+            for (n in textNodes) {
+                var current: AccessibilityNodeInfo? = n
+                while (current != null) {
+                    val p = current
+                    if (p?.isClickable == true) return p
+                    current = p?.parent
+                }
+                if (n.isClickable) return n
+            }
+        }
+
+        fun searchDesc(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node == null) return null
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+            if (keywords.any { desc.contains(it) }) {
+                var current: AccessibilityNodeInfo? = node
+                while (current != null) {
+                    val p = current
+                    if (p?.isClickable == true) return p
+                    current = p?.parent
+                }
+                return node
+            }
+            for (i in 0 until node.childCount) {
+                val f = searchDesc(node.getChild(i))
+                if (f != null) return f
+            }
+            return null
+        }
+
+        return searchDesc(root)
+    }
+
+    private fun clickNetworkCategoryIfPresent(root: AccessibilityNodeInfo): Boolean {
+        // Search for intermediate network category tiles (Vivo, Samsung, MIUI, AOSP)
         val categoryKeywords = listOf(
-            "Other networks and connections",
+            "Other networks",
             "Connections",
             "Network & internet",
-            "Wireless & networks",
+            "Wireless",
             "Connection & sharing",
             "Mobile network"
         )
@@ -250,22 +357,21 @@ class IpHuntAccessibilityService : AccessibilityService() {
                 }
                 if (clickableParent != null && clickableParent.isClickable) {
                     AppLogger.d("IpHuntAccessibility", "Clicking intermediate category: $kw")
-                    clickableParent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    delay(450)
-                    return
-                } else {
-                    // Try gesture click on node bounds center
-                    val rect = Rect()
-                    node.getBoundsInScreen(rect)
-                    if (!rect.isEmpty) {
-                        AppLogger.d("IpHuntAccessibility", "Tapping bounds center for: $kw")
-                        dispatchTouchTap(rect.centerX().toFloat(), rect.centerY().toFloat())
-                        delay(450)
-                        return
-                    }
+                    val ok = clickableParent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    if (ok) return true
+                }
+
+                // If performAction failed or node wasn't marked clickable, tap bounds center
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                if (!rect.isEmpty && rect.centerX() > 0 && rect.centerY() > 0) {
+                    AppLogger.d("IpHuntAccessibility", "Tapping bounds center for: $kw at $rect")
+                    val tapped = dispatchTouchTap(rect.centerX().toFloat(), rect.centerY().toFloat())
+                    if (tapped) return true
                 }
             }
         }
+        return false
     }
 
     /**
