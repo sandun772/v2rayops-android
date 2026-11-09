@@ -4,6 +4,7 @@ import android.app.Activity
 import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -449,30 +450,29 @@ private fun FineTuneRunningAnimatedSection(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Cancel Button directly inside the percentage circle
+                    // Subtle, understated cancel action inside the progress dial
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF23101C))
-                            .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0F1526))
+                            .border(0.5.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
                             .clickable(onClick = onCancel)
-                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                            .padding(horizontal = 8.dp, vertical = 2.5.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.Close,
                                 contentDescription = "Cancel",
-                                tint = Color(0xFFF87171),
-                                modifier = Modifier.size(10.dp)
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(9.dp)
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "CANCEL",
-                                fontSize = 8.sp,
+                                text = "click to cancel",
+                                fontSize = 7.5.sp,
                                 fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFF87171),
-                                letterSpacing = 0.5.sp
+                                color = Color(0xFF64748B),
+                                letterSpacing = 0.2.sp
                             )
                         }
                     }
@@ -948,14 +948,20 @@ private fun FineTuneTipsBottomCard(
                     letterSpacing = 0.5.sp
                 )
                 Spacer(modifier = Modifier.height(1.dp))
-                Text(
-                    text = tips[currentTipIndex],
-                    fontSize = 8.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFFCBD5E1),
-                    lineHeight = 11.5.sp,
-                    maxLines = 2
-                )
+                Crossfade(
+                    targetState = currentTipIndex,
+                    animationSpec = tween(durationMillis = 400),
+                    label = "tipFade"
+                ) { index ->
+                    Text(
+                        text = tips[index],
+                        fontSize = 8.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFCBD5E1),
+                        lineHeight = 11.5.sp,
+                        maxLines = 2
+                    )
+                }
             }
         }
     }
