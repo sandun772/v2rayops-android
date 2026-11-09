@@ -1,11 +1,16 @@
 package com.v2rayops.client.ui.navigation
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.v2rayops.client.auth.ui.LoginScreen
+import com.v2rayops.client.domain.repository.AuthDeepLinkPayload
 import com.v2rayops.client.settings.ui.SettingsScreen
 import com.v2rayops.client.ui.dashboard.DashboardScreen
 import com.v2rayops.client.ui.logs.DevLogsScreen
@@ -17,12 +22,12 @@ import com.v2rayops.client.ui.splash.SplashScreen
 @Composable
 fun AppNavGraph(
     navController: NavHostController,
-    deepLinkCode: String? = null,
+    deepLinkPayload: AuthDeepLinkPayload? = null,
     onDeepLinkHandled: () -> Unit = {},
     startDestination: String = Screen.Splash.route
 ) {
-    LaunchedEffect(deepLinkCode) {
-        if (!deepLinkCode.isNullOrBlank()) {
+    LaunchedEffect(deepLinkPayload) {
+        if (deepLinkPayload != null && deepLinkPayload.customerCode.isNotBlank()) {
             navController.navigate(Screen.Login.route)
         }
     }
@@ -31,7 +36,12 @@ fun AppNavGraph(
         navController = navController,
         startDestination = startDestination
     ) {
-        composable(Screen.Splash.route) {
+        composable(
+            route = Screen.Splash.route,
+            exitTransition = {
+                fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
+            }
+        ) {
             SplashScreen(
                 onNavigateToDashboard = {
                     navController.navigate(Screen.Dashboard.route) {
@@ -46,9 +56,14 @@ fun AppNavGraph(
             )
         }
 
-        composable(Screen.Login.route) {
+        composable(
+            route = Screen.Login.route,
+            enterTransition = {
+                fadeIn(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
+            }
+        ) {
             LoginScreen(
-                deepLinkCode = deepLinkCode,
+                deepLinkPayload = deepLinkPayload,
                 onLoginSuccess = {
                     onDeepLinkHandled()
                     navController.navigate(Screen.Dashboard.route) {
@@ -58,7 +73,12 @@ fun AppNavGraph(
             )
         }
 
-        composable(Screen.Dashboard.route) {
+        composable(
+            route = Screen.Dashboard.route,
+            enterTransition = {
+                fadeIn(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing))
+            }
+        ) {
             DashboardScreen(
                 onNavigateToServers = {
                     navController.navigate(Screen.ServerSelection.route)
@@ -101,6 +121,11 @@ fun AppNavGraph(
             SettingsScreen(
                 onBackClick = {
                     navController.popBackStack()
+                },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
                 },
                 onNavigateToLogs = {
                     navController.navigate(Screen.Logs.route)
@@ -153,6 +178,17 @@ fun AppNavGraph(
             RouteFinderScreen(
                 onBackClick = {
                     navController.popBackStack()
+                },
+                onNavigateToHome = {
+                    navController.navigate(Screen.Dashboard.route) {
+                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                    }
+                },
+                onNavigateToFinetune = {
+                    navController.navigate(Screen.Optimizer.route)
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Screen.Settings.route)
                 }
             )
         }

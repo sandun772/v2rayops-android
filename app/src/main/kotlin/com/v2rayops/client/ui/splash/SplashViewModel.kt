@@ -35,19 +35,24 @@ class SplashViewModel @Inject constructor(
 
     private fun checkAuthentication() {
         viewModelScope.launch(Dispatchers.IO) {
-            val code = authRepository.getSavedCustomerCode() ?: "267968"
-            // Dev & Offline mode: automatically sync servers & configs in background
-            launch {
-                try {
-                    serverRepository.refreshServers()
-                } catch (_: Exception) {}
+            val savedCode = authRepository.getSavedCustomerCode()
+            if (!savedCode.isNullOrBlank()) {
+                // User is already authenticated: sync servers & configs in background
+                launch {
+                    try {
+                        serverRepository.refreshServers()
+                    } catch (_: Exception) {}
+                }
+                launch {
+                    try {
+                        subscriptionRepository.syncConfigs(savedCode)
+                    } catch (_: Exception) {}
+                }
+                _target.value = SplashNavigationTarget.Dashboard
+            } else {
+                // Unauthenticated user: navigate to Login for Google / web auth
+                _target.value = SplashNavigationTarget.Login
             }
-            launch {
-                try {
-                    subscriptionRepository.syncConfigs(code)
-                } catch (_: Exception) {}
-            }
-            _target.value = SplashNavigationTarget.Dashboard
         }
     }
 }

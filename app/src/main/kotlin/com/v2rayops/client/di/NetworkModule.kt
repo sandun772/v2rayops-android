@@ -3,6 +3,8 @@ package com.v2rayops.client.di
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.v2rayops.client.BuildConfig
+import com.v2rayops.client.core.network.SmartVpnProxySelector
+import com.v2rayops.client.data.api.GitHubReleaseApi
 import com.v2rayops.client.data.api.V2RayOpsClientApi
 import dagger.Module
 import dagger.Provides
@@ -31,9 +33,10 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
         val builder = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .proxySelector(SmartVpnProxySelector())
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
 
         if (BuildConfig.DEBUG) {
             val logging = HttpLoggingInterceptor().apply {
@@ -59,5 +62,11 @@ object NetworkModule {
     @Singleton
     fun provideV2RayOpsClientApi(retrofit: Retrofit): V2RayOpsClientApi {
         return retrofit.create(V2RayOpsClientApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGitHubReleaseApi(retrofit: Retrofit): GitHubReleaseApi {
+        return retrofit.create(GitHubReleaseApi::class.java)
     }
 }

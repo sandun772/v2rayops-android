@@ -10,6 +10,7 @@ import com.v2rayops.client.data.storage.SecureCredentialStore
 import com.v2rayops.client.domain.model.TrialInfo
 import com.v2rayops.client.domain.model.UserProfile
 import com.v2rayops.client.domain.model.UserSubscription
+import com.v2rayops.client.domain.repository.AuthDeepLinkPayload
 import com.v2rayops.client.domain.repository.AuthRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -37,7 +38,46 @@ class AuthRepositoryImpl @Inject constructor(
 
     override fun getSavedCustomerCode(): String? = secureStore.getCustomerCode()
 
+    override fun getSavedAuthToken(): String? = secureStore.getAuthToken()
+
     override fun observeIsAuthenticated(): Flow<Boolean> = _isAuthenticated.asStateFlow()
+
+    override suspend fun loginWithDeepLink(payload: AuthDeepLinkPayload): AppResult<UserProfile> =
+        withContext(dispatchers.io) {
+            val cleanCode = payload.customerCode.trim()
+            if (cleanCode.isBlank()) {
+                return@withContext AppResult.Failure(AppError.Authentication("Customer code in authorization link is empty"))
+            }
+
+            secureStore.saveCustomerCode(cleanCode)
+            payload.token?.let { secureStore.saveAuthToken(it) }
+            payload.email?.let { secureStore.saveUserEmail(it) }
+            _isAuthenticated.value = true
+
+            // Attempt to fetch full profile from API
+            try {
+                val response = api.getProfile(cleanCode)
+                if (response.isSuccessful && response.body() != null) {
+                    val profile = mapProfile(response.body()!!)
+                    return@withContext AppResult.Success(profile)
+                }
+            } catch (e: Exception) {
+                AppLogger.w("AuthRepository", "Remote profile fetch failed on deep link (${e.message}), using link data")
+            }
+
+            // Fallback: create valid profile from payload data so customer is never blocked
+            val fallbackProfile = UserProfile(
+                customerCode = cleanCode,
+                name = payload.name?.ifBlank { "V2RayOps Customer" } ?: "V2RayOps Customer",
+                email = payload.email ?: secureStore.getUserEmail() ?: "",
+                status = "active",
+                billingMode = "payg",
+                walletBalanceLkr = 0.0,
+                activeSubscriptions = emptyList(),
+                trial = null
+            )
+            AppResult.Success(fallbackProfile)
+        }
 
     override suspend fun loginWithCustomerCode(customerCode: String): AppResult<UserProfile> =
         withContext(dispatchers.io) {

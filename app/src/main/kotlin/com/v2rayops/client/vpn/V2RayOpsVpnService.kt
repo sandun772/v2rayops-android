@@ -30,6 +30,10 @@ class V2RayOpsVpnService : VpnService() {
 
         private const val NOTIFICATION_ID = 7788
         private const val CHANNEL_ID = "v2rayops_vpn_channel"
+
+        @Volatile
+        var isRunning: Boolean = false
+            private set
     }
 
     @Inject
@@ -134,16 +138,19 @@ class V2RayOpsVpnService : VpnService() {
 
                 val result = xrayEngine.start(configJson, tunFd)
                 if (result.isSuccess) {
+                    isRunning = true
                     AppLogger.i("V2RayOpsVpnService", "Xray core engine successfully started on TUN fd $tunFd")
                     val activeNotification = buildNotification("Protected • Connected to $serverName")
                     val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     manager.notify(NOTIFICATION_ID, activeNotification)
                 } else {
+                    isRunning = false
                     val err = result.exceptionOrNull()?.message ?: "Xray startup failed"
                     AppLogger.e("V2RayOpsVpnService", "Failed to start Xray core: $err")
                     stopVpnTunnel()
                 }
             } catch (t: Throwable) {
+                isRunning = false
                 AppLogger.e("V2RayOpsVpnService", "Exception establishing VPN tunnel", t)
                 stopVpnTunnel()
             }
@@ -152,6 +159,7 @@ class V2RayOpsVpnService : VpnService() {
 
     private fun stopVpnTunnel() {
         synchronized(connectionLock) {
+            isRunning = false
             AppLogger.i("V2RayOpsVpnService", "Stopping VPN Service and closing TUN interface")
             try {
                 vpnInterface?.close()
@@ -226,14 +234,26 @@ class V2RayOpsVpnService : VpnService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val largeIconBitmap = try {
+            android.graphics.BitmapFactory.decodeResource(resources, R.drawable.v2rayops_logo)
+        } catch (_: Exception) {
+            null
+        }
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("V2RayOPS VPN")
             .setContentText(statusText)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification_v2)
+            .setColor(0xFF6366F1.toInt())
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .addAction(0, "Disconnect", stopIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+
+        if (largeIconBitmap != null) {
+            builder.setLargeIcon(largeIconBitmap)
+        }
+
+        return builder.build()
     }
 }

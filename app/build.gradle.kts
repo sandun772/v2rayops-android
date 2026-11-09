@@ -22,11 +22,14 @@ android {
         }
 
         buildConfigField("String", "DEFAULT_BASE_URL", "\"https://v2rayops.vpnxhub.com:2083/\"")
+        buildConfigField("String", "GITHUB_REPO_OWNER", "\"sandun772\"")
+        buildConfigField("String", "GITHUB_REPO_NAME", "\"v2rayops-android\"")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -79,6 +82,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.browser)
 
     // Jetpack Compose
     implementation(platform(libs.compose.bom))
