@@ -58,6 +58,7 @@ private val CardBorderDark = Color(0xFF151E34)
 fun PullDownChargingPill(
     pullOffset: Float,
     chargeProgress: Float,
+    isRetest: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -100,9 +101,18 @@ fun PullDownChargingPill(
                     }
                 }
 
-                val remainingSec = (1.0f * (1.0f - chargeProgress)).coerceAtLeast(0f)
+                val totalSec = if (isRetest) 1.0f else 3.0f
+                val remainingSec = (totalSec * (1.0f - chargeProgress)).coerceAtLeast(0f)
+                val labelText = if (chargeProgress >= 1f) {
+                    "READY"
+                } else if (isRetest) {
+                    "HOLD 1S FOR RETEST (${"%.1f".format(Locale.US, remainingSec)}s)"
+                } else {
+                    "HOLD 3S FOR AUDIT (${"%.1f".format(Locale.US, remainingSec)}s)"
+                }
+
                 Text(
-                    text = if (chargeProgress >= 1f) "READY" else "HOLD 1S FOR AUDIT (${"%.1f".format(Locale.US, remainingSec)}s)",
+                    text = labelText,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,

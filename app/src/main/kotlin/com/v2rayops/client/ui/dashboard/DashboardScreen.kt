@@ -96,6 +96,7 @@ fun DashboardScreen(
     var isCharging by remember { mutableStateOf(false) }
     var chargeProgress by remember { mutableFloatStateOf(0f) }
     var isHiddenWidgetVisible by remember { mutableStateOf(false) }
+    var isRetestMode by remember { mutableStateOf(false) }
 
     val animatedPullOffset by animateFloatAsState(
         targetValue = pullDistance,
@@ -122,10 +123,10 @@ fun DashboardScreen(
         }
     }
 
-    // 1-second hold countdown effect
+    // Hold countdown effect: 3s for initial trigger, 1s for retest
     LaunchedEffect(isCharging) {
         if (isCharging) {
-            val durationMs = 1000L
+            val durationMs = if (isRetestMode) 1000L else 3000L
             val startTime = System.currentTimeMillis()
             while (isCharging) {
                 val elapsed = System.currentTimeMillis() - startTime
@@ -211,8 +212,10 @@ fun DashboardScreen(
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        if (scrollState.value > 0) return@awaitEachGesture
+                        // Disallow pull if scrolled down OR if speed test is currently running
+                        if (scrollState.value > 0 || quickAuditState.isRunning) return@awaitEachGesture
 
+                        isRetestMode = isHiddenWidgetVisible
                         val startY = down.position.y
                         var armed = false
 
@@ -222,6 +225,11 @@ fun DashboardScreen(
                                 val pointer = event.changes.find { it.id == down.id }
                                 if (pointer == null || !pointer.pressed) {
                                     break
+                                }
+
+                                // If test was already fired during this hold, wait for finger to be lifted!
+                                if (!isCharging && armed) {
+                                    continue
                                 }
 
                                 val deltaY = pointer.position.y - startY
@@ -258,10 +266,11 @@ fun DashboardScreen(
             ) {
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Pull-Down 3s Charging Pill (animates smoothly down with finger drag)
+                // Pull-Down Charging Pill (Initial trigger: 3s hold, Retest: 1s hold)
                 PullDownChargingPill(
                     pullOffset = animatedPullOffset,
-                    chargeProgress = chargeProgress
+                    chargeProgress = chargeProgress,
+                    isRetest = isRetestMode
                 )
 
                 // 3-Card Speed & Stability HUD (DOWNLOAD | UPLOAD | STABILITY)
