@@ -65,7 +65,16 @@ class SubscriptionRepositoryImpl @Inject constructor(
                         serverFlag = obj.optString("serverFlag", "SG"),
                         sni = obj.optString("sni", parsed?.sni ?: ""),
                         wsHost = obj.optString("wsHost", parsed?.wsHost ?: ""),
-                        wsPath = obj.optString("wsPath", parsed?.wsPath ?: "")
+                        wsPath = obj.optString("wsPath", parsed?.wsPath ?: ""),
+                        tuningMode = if (obj.has("tuningMode") && !obj.isNull("tuningMode")) obj.getString("tuningMode") else null,
+                        customMtu = if (obj.has("customMtu") && !obj.isNull("customMtu")) obj.getInt("customMtu") else null,
+                        customTcpBufferKb = if (obj.has("customTcpBufferKb") && !obj.isNull("customTcpBufferKb")) obj.getInt("customTcpBufferKb") else null,
+                        customDns = if (obj.has("customDns") && !obj.isNull("customDns")) obj.getString("customDns") else null,
+                        dpiDelayFix = if (obj.has("dpiDelayFix") && !obj.isNull("dpiDelayFix")) obj.getBoolean("dpiDelayFix") else null,
+                        smartQoS = if (obj.has("smartQoS") && !obj.isNull("smartQoS")) obj.getBoolean("smartQoS") else null,
+                        measuredSpeedMbps = if (obj.has("measuredSpeedMbps") && !obj.isNull("measuredSpeedMbps")) obj.getInt("measuredSpeedMbps") else null,
+                        measuredPingMs = if (obj.has("measuredPingMs") && !obj.isNull("measuredPingMs")) obj.getLong("measuredPingMs") else null,
+                        stabilityScore = if (obj.has("stabilityScore") && !obj.isNull("stabilityScore")) obj.getInt("stabilityScore") else null
                     )
                 )
             }
@@ -103,6 +112,15 @@ class SubscriptionRepositoryImpl @Inject constructor(
                     put("sni", c.sni)
                     put("wsHost", c.wsHost)
                     put("wsPath", c.wsPath)
+                    c.tuningMode?.let { put("tuningMode", it) }
+                    c.customMtu?.let { put("customMtu", it) }
+                    c.customTcpBufferKb?.let { put("customTcpBufferKb", it) }
+                    c.customDns?.let { put("customDns", it) }
+                    c.dpiDelayFix?.let { put("dpiDelayFix", it) }
+                    c.smartQoS?.let { put("smartQoS", it) }
+                    c.measuredSpeedMbps?.let { put("measuredSpeedMbps", it) }
+                    c.measuredPingMs?.let { put("measuredPingMs", it) }
+                    c.stabilityScore?.let { put("stabilityScore", it) }
                 }
                 array.put(obj)
             }
@@ -110,6 +128,22 @@ class SubscriptionRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             AppLogger.w("SubscriptionRepository", "Failed to cache configs to storage: ${e.message}")
         }
+    }
+
+    override fun saveTunedPresets(presets: List<VpnConfig>) {
+        if (presets.isEmpty()) return
+        val currentList = _configs.value.toMutableList()
+        for (preset in presets) {
+            val idx = currentList.indexOfFirst { it.id == preset.id || (it.tuningMode != null && it.tuningMode == preset.tuningMode) }
+            if (idx >= 0) {
+                currentList[idx] = preset
+            } else {
+                currentList.add(preset)
+            }
+        }
+        _configs.value = currentList
+        saveConfigsToCache(currentList)
+        AppLogger.i("SubscriptionRepository", "Saved ${presets.size} tuned presets to persistent configuration store")
     }
 
     override fun observeConfigs(): Flow<List<VpnConfig>> = _configs.asStateFlow()

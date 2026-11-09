@@ -27,6 +27,13 @@ class XrayConfigGenerator @Inject constructor(
 
         val parsed = profileParser.parseUri(config.configUri)
 
+        // Per-config Optimization Presets with UserSettings fallback
+        val effectiveDns = config.customDns?.takeIf { it.isNotBlank() } ?: settings.customDns.ifBlank { "1.1.1.1" }
+        val effectiveMtu = config.customMtu ?: if (settings.cellularMtuOptimized) 1380 else 1500
+        val effectiveDpiFix = config.dpiDelayFix ?: settings.dpiDelayFixEnabled
+        val effectiveSmartQoS = config.smartQoS ?: settings.smartQoSEnabled
+        val effectiveTcpBufferKb = config.customTcpBufferKb ?: settings.tcpBufferSizeKb
+
         val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
         val isVpsHost = { h: String ->
             h.contains("vpnxhub.com", ignoreCase = true) || h == "172.236.134.215"
@@ -45,7 +52,7 @@ class XrayConfigGenerator @Inject constructor(
         // 2. DNS
         val dns = JSONObject().apply {
             val servers = JSONArray().apply {
-                put(settings.customDns.ifBlank { "1.1.1.1" })
+                put(effectiveDns)
                 put("8.8.8.8")
                 put("tcp://1.1.1.1")
                 put("https://1.1.1.1/dns-query")
@@ -77,7 +84,6 @@ class XrayConfigGenerator @Inject constructor(
         root.put("dns", dns)
 
         // 3. Inbounds (Native TUN + Local SOCKS & HTTP)
-        val effectiveMtu = if (settings.cellularMtuOptimized) 1380 else 1500
         val inbounds = JSONArray().apply {
             // Layer 3 TUN inbound for native Android VpnService capture
             put(JSONObject().apply {
@@ -266,7 +272,7 @@ class XrayConfigGenerator @Inject constructor(
                     val sockopt = JSONObject().apply {
                         put("tcpNoDelay", true)
                         put("tcpKeepAliveInterval", 15)
-                        if (settings.dpiDelayFixEnabled) {
+                        if (effectiveDpiFix) {
                             put("dialerProxy", "fragment")
                         }
                     }
@@ -278,7 +284,7 @@ class XrayConfigGenerator @Inject constructor(
         outbounds.put(proxyOutbound)
 
         // DPI Evasion & Jitter Fix Outbound (TLS Packet Fragmentation)
-        if (settings.dpiDelayFixEnabled) {
+        if (effectiveDpiFix) {
             outbounds.put(JSONObject().apply {
                 put("tag", "fragment")
                 put("protocol", "freedom")
@@ -423,7 +429,7 @@ class XrayConfigGenerator @Inject constructor(
                     put("uplinkOnly", 1)
                     put("downlinkOnly", 1)
                     // Smart QoS: Restrict buffer size to apply TCP sliding window backpressure and mitigate bufferbloat
-                    val bufKb = if (settings.smartQoSEnabled) settings.tcpBufferSizeKb.coerceIn(64, 4096) else 64
+                    val bufKb = if (effectiveSmartQoS) effectiveTcpBufferKb.coerceIn(64, 4096) else 64
                     put("bufferSize", bufKb)
                 }
                 put("8", level8)

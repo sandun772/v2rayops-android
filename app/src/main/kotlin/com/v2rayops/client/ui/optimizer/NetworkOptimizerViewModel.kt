@@ -59,9 +59,18 @@ class NetworkOptimizerViewModel @Inject constructor(
 
     val beastProgressState: StateFlow<BeastProgressState> = beastOptimizerEngine.progressState
 
-    fun startOneClickFineTune() {
+    fun setFineTuneTargetMode(mode: com.v2rayops.client.network.OptimizationMode) {
+        oneClickFineTuneManager.setTargetMode(mode)
+    }
+
+    fun startOneClickFineTune(mode: com.v2rayops.client.network.OptimizationMode = fineTuneState.value.targetMode) {
         val target = selectedConfig.value
-        oneClickFineTuneManager.startFineTune(target)
+        oneClickFineTuneManager.startFineTune(target, mode)
+    }
+
+    fun selectPresetConfig(preset: VpnConfig) {
+        subscriptionRepository.selectConfig(preset)
+        vpnManager.connect(preset)
     }
 
     fun stopOneClickFineTune() {

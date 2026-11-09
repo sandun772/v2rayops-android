@@ -234,7 +234,9 @@ fun NetworkOptimizerScreen(
                     selectedConfig = selectedConfig,
                     onStartFineTune = handleStartFineTune,
                     onStopFineTune = { viewModel.stopOneClickFineTune() },
-                    onDismissReport = { viewModel.dismissFineTuneReport() }
+                    onDismissReport = { viewModel.dismissFineTuneReport() },
+                    onSelectMode = { viewModel.setFineTuneTargetMode(it) },
+                    onSelectPreset = { viewModel.selectPresetConfig(it) }
                 )
             }
 

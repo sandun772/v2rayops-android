@@ -16,7 +16,17 @@ data class VpnConfig(
     val serverFlag: String = "",
     val sni: String = "",
     val wsHost: String = "",
-    val wsPath: String = ""
+    val wsPath: String = "",
+    // Per-config Optimization Mode & Kernel Presets
+    val tuningMode: String? = null,           // "BALANCED", "SPEED", "STABILITY"
+    val customMtu: Int? = null,               // e.g. 1380 (cellular), 1360 (stability), 1500
+    val customTcpBufferKb: Int? = null,       // e.g. 1024 (speed), 512 (balanced), 256 (stability)
+    val customDns: String? = null,            // e.g. "1.1.1.1"
+    val dpiDelayFix: Boolean? = null,         // TLS fragmentation bypass
+    val smartQoS: Boolean? = null,            // Adaptive QoS traffic shaping
+    val measuredSpeedMbps: Int? = null,       // Live benchmarked peak speed
+    val measuredPingMs: Long? = null,         // Live benchmarked round-trip latency
+    val stabilityScore: Int? = null           // Live benchmarked stability score (0-100)
 ) {
     val isVless: Boolean get() = protocol.equals("vless", ignoreCase = true)
     val isVmess: Boolean get() = protocol.equals("vmess", ignoreCase = true)

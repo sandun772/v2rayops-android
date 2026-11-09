@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.network.FineTunePhase
 import com.v2rayops.client.network.FineTuneState
+import com.v2rayops.client.network.OptimizationMode
 import com.v2rayops.client.ui.dashboard.components.deriveConfigPackageDetails
 
 @Composable
@@ -55,6 +56,8 @@ fun OneClickFineTuneCard(
     onStartFineTune: () -> Unit,
     onStopFineTune: () -> Unit,
     onDismissReport: () -> Unit,
+    onSelectMode: (OptimizationMode) -> Unit = {},
+    onSelectPreset: (VpnConfig) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val meta = remember(selectedConfig) { deriveConfigPackageDetails(selectedConfig) }
@@ -283,65 +286,189 @@ fun OneClickFineTuneCard(
             } else if (isCompleted) {
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Tuning Result Metrics (Route • Speed • Ping • Stability)
+                // Presets Title Row
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF060913))
-                        .border(1.dp, Color(0xFF141E33), RoundedCornerShape(10.dp))
-                        .padding(10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "OPTIMAL FRONT",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF64748B)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = state.winningRoute?.domain ?: "support.zoom.us",
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
+                    Text(
+                        text = "3 TUNED MODE PRESETS",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFA5B4FC)
+                    )
+                    Text(
+                        text = "1-TAP TO ACTIVATE",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF64748B)
+                    )
+                }
 
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "SPEED",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF64748B)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "${state.measuredSpeedMbps} Mbps",
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF818CF8)
-                        )
-                    }
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "PING / STABILITY",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF64748B)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "${state.measuredPingMs}ms • ${"%.1f".format(state.stabilityPercent)}%",
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF22C55E)
-                        )
+                // 3 Mode Preset Mini Cards
+                val presets = listOfNotNull(
+                    state.balancedPreset ?: selectedConfig?.takeIf { it.tuningMode == "BALANCED" },
+                    state.speedPreset ?: selectedConfig?.takeIf { it.tuningMode == "SPEED" },
+                    state.stabilityPreset ?: selectedConfig?.takeIf { it.tuningMode == "STABILITY" }
+                )
+
+                if (presets.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        presets.forEach { preset ->
+                            val isPresetActive = selectedConfig?.id == preset.id
+                            val modeColor = when (preset.tuningMode?.uppercase()) {
+                                "SPEED" -> Color(0xFF6366F1)
+                                "STABILITY" -> Color(0xFF10B981)
+                                else -> Color(0xFF8B5CF6)
+                            }
+                            val modeTitle = preset.tuningMode ?: "BALANCED"
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isPresetActive) Color(0xFF12182E) else Color(0xFF090D1A))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isPresetActive) modeColor else Color(0xFF1B243B),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { onSelectPreset(preset) }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isPresetActive) modeColor else Color(0xFF475569))
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = modeTitle,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = modeColor
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "• ${preset.effectiveSni}",
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = Color(0xFF94A3B8),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = "MTU ${preset.customMtu ?: 1380} • ${preset.customTcpBufferKb ?: 512}KB Buffer",
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = Color(0xFF64748B)
+                                        )
+                                    }
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (preset.measuredPingMs != null && preset.measuredPingMs > 0) {
+                                        Text(
+                                            text = "${preset.measuredPingMs}ms",
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF22C55E)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (isPresetActive) modeColor.copy(alpha = 0.2f) else Color(0xFF141C30))
+                                            .border(1.dp, if (isPresetActive) modeColor else Color(0xFF243252), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isPresetActive) "ACTIVE" else "SWITCH",
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isPresetActive) modeColor else Color(0xFFA5B4FC)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback Single Metric Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF060913))
+                            .border(1.dp, Color(0xFF141E33), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "OPTIMAL FRONT",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF64748B)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = state.winningRoute?.domain ?: "support.zoom.us",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "SPEED",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF64748B)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (state.measuredSpeedMbps > 0) "${state.measuredSpeedMbps} Mbps" else "Active",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF818CF8)
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "PING / STABILITY",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF64748B)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${state.measuredPingMs}ms • ${"%.1f".format(state.stabilityPercent)}%",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF22C55E)
+                            )
+                        }
                     }
                 }
 
@@ -349,7 +476,7 @@ fun OneClickFineTuneCard(
 
                 // Dev Optimizer Settings Capsule
                 Text(
-                    text = "⚙ ${state.appliedSettingsSummary}",
+                    text = state.appliedSettingsSummary,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     color = Color(0xFF64748B)
@@ -376,7 +503,7 @@ fun OneClickFineTuneCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "RUN FULL TUNE AGAIN",
+                        text = "RE-TUNE ALL 3 PRESETS",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -403,6 +530,42 @@ fun OneClickFineTuneCard(
                         fontFamily = FontFamily.Monospace,
                         color = Color(0xFFA5B4FC)
                     )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Mode Selector Bar: [ BALANCED ] | [ SPEED ] | [ STABILITY ]
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OptimizationMode.entries.forEach { mode ->
+                        val isSelected = state.targetMode == mode
+                        val modeColor = Color(mode.badgeColor)
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) modeColor.copy(alpha = 0.2f) else Color(0xFF0A0F1F))
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isSelected) modeColor else Color(0xFF1E2742),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable { onSelectMode(mode) }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = mode.displayName.uppercase(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (isSelected) modeColor else Color(0xFF94A3B8)
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))

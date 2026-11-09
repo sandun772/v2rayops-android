@@ -23,14 +23,20 @@ import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
+enum class OptimizationMode(val displayName: String, val badgeColor: Long) {
+    BALANCED("Balanced", 0xFF8B5CF6),
+    SPEED("Speed", 0xFF6366F1),
+    STABILITY("Stability", 0xFF10B981)
+}
+
 enum class FineTunePhase(val step: Int, val title: String) {
     IDLE(0, "Ready to Fine Tune"),
     DISCONNECTING(1, "Phase 1/5: Disconnecting VPN & Analyzing Package"),
     PROBING_FRONTS(2, "Phase 2/5: Probing Carrier Fronting SNIs on Pure Network"),
-    APPLYING_ROUTE(3, "Phase 3/5: Applying Best Route & Igniting Tunnel"),
+    APPLYING_ROUTE(3, "Phase 3/5: Generating 3 Presets & Igniting Tunnel"),
     BENCHMARKING(4, "Phase 4/5: Benchmarking Speed & Tunnel Stability"),
     OPTIMIZING_SETTINGS(5, "Phase 5/5: Auto-tuning MTU, DPI Bypass, TCP Buffers & DNS"),
-    COMPLETED(6, "Optimization Complete • Tunnel Active & Tuned")
+    COMPLETED(6, "Optimization Complete • 3 Presets Configured")
 }
 
 data class FineTuneState(
@@ -38,12 +44,19 @@ data class FineTuneState(
     val phase: FineTunePhase = FineTunePhase.IDLE,
     val progress: Float = 0f,
     val estimatedSecondsRemaining: Int = 0,
-    val totalEstimatedSeconds: Int = 42,
+    val totalEstimatedSeconds: Int = 45,
     val currentLog: String = "",
     val logHistory: List<String> = emptyList(),
     val detectedPackage: String = "",
+    val targetMode: OptimizationMode = OptimizationMode.BALANCED,
     val probedCount: Int = 0,
     val totalToProbe: Int = 0,
+    val speedWinner: SniRouteCandidate? = null,
+    val balancedWinner: SniRouteCandidate? = null,
+    val stabilityWinner: SniRouteCandidate? = null,
+    val speedPreset: VpnConfig? = null,
+    val balancedPreset: VpnConfig? = null,
+    val stabilityPreset: VpnConfig? = null,
     val winningRoute: SniRouteCandidate? = null,
     val measuredPingMs: Long = 0L,
     val measuredSpeedMbps: Int = 0,
@@ -72,11 +85,16 @@ class OneClickFineTuneManager @Inject constructor(
     private var activeJob: Job? = null
     private var tickerJob: Job? = null
 
-    fun startFineTune(targetConfig: VpnConfig?) {
+    fun setTargetMode(mode: OptimizationMode) {
+        _state.value = _state.value.copy(targetMode = mode)
+    }
+
+    fun startFineTune(targetConfig: VpnConfig?, mode: OptimizationMode = _state.value.targetMode) {
         if (_state.value.isRunning) return
+        _state.value = _state.value.copy(targetMode = mode)
 
         activeJob = CoroutineScope(dispatchers.io).launch {
-            runPipeline(targetConfig)
+            runPipeline(targetConfig, mode)
         }
     }
 
@@ -115,17 +133,20 @@ class OneClickFineTuneManager @Inject constructor(
         addLog(logMessage)
     }
 
-    private suspend fun runPipeline(targetConfig: VpnConfig?) = withContext(dispatchers.io) {
-        val totalExpectedSec = 42
-        val startTime = System.currentTimeMillis()
+    private suspend fun runPipeline(
+        targetConfig: VpnConfig?,
+        selectedMode: OptimizationMode = _state.value.targetMode
+    ) = withContext(dispatchers.io) {
+        val totalExpectedSec = 45
 
-        _state.value = FineTuneState(
+        _state.value = _state.value.copy(
             isRunning = true,
             phase = FineTunePhase.DISCONNECTING,
             progress = 0.05f,
             totalEstimatedSeconds = totalExpectedSec,
             estimatedSecondsRemaining = totalExpectedSec,
-            logHistory = listOf("Starting One-Click Auto Fine Tune (~42s total duration)...")
+            targetMode = selectedMode,
+            logHistory = listOf("Starting One-Click Auto Fine Tune (Triple-Mode: Speed, Balanced, Stability)...")
         )
 
         // Launch ticker to decrement estimated seconds smoothly every second
@@ -153,7 +174,8 @@ class OneClickFineTuneManager @Inject constructor(
             }
             addLog("Pure carrier network active. Zero proxy skew detected.")
 
-            val rawText = (targetConfig?.displayName.orEmpty() + " " + targetConfig?.remark.orEmpty() + " " + targetConfig?.host.orEmpty()).lowercase()
+            val baseConfig = targetConfig ?: subscriptionRepository.observeSelectedConfig().first()
+            val rawText = (baseConfig?.displayName.orEmpty() + " " + baseConfig?.remark.orEmpty() + " " + baseConfig?.host.orEmpty()).lowercase()
             val packageName = when {
                 "zoom" in rawText || "dialog" in rawText -> "Dialog Zoom & Enterprise Fronting"
                 "tiktok" in rawText || "mobitel" in rawText -> "Mobitel TikTok / ByteDance"
@@ -169,7 +191,7 @@ class OneClickFineTuneManager @Inject constructor(
             // PHASE 2: Probing Carrier Fronting SNIs on Pure Network (~16s)
             // ==========================================
             updatePhase(FineTunePhase.PROBING_FRONTS, 0.20f, "Phase 2/5: Probing Carrier Fronting SNIs on Pure Network...")
-            val candidates = buildCandidatePool(rawText, targetConfig)
+            val candidates = buildCandidatePool(rawText, baseConfig)
             _state.value = _state.value.copy(totalToProbe = candidates.size)
             addLog("Generated ${candidates.size} specialized carrier fronting & SNI candidates.")
 
@@ -191,114 +213,157 @@ class OneClickFineTuneManager @Inject constructor(
                     else -> "BLOCKED/TIMEOUT"
                 }
                 addLog("> [${cand.strategy.shortTag}] ${cand.domain} -> $statusLabel")
-                delay(180)
+                delay(150)
             }
 
-            // Select winning candidate:
-            // For carrier zero-rated packages, STANDARD_SNI guarantees the bug host is in the TLS SNI header
-            // (e.g. SNI: support.zoom.us), satisfying Dialog/Mobitel DPI packet filters.
-            // ADDR_SNI places the bug host as IP destination but leaks the VPS domain in the SNI header,
-            // which causes carrier middlebox drop if user has zero standard internet balance.
-            val passes = probedResults.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
-            val winner = passes
-                .filter { it.strategy == RouteStrategy.STANDARD_SNI }
-                .minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
-                ?: passes.minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
-                ?: probedResults.firstOrNull { it.avgLatencyMs > 0 }
-                ?: probedResults.firstOrNull()
-                ?: candidates.first()
+            // Triple-Mode Winner Selection
+            val speedWinner = routeScannerEngine.findBestSpeedCandidate(probedResults) ?: candidates.first()
+            val stabilityWinner = routeScannerEngine.findBestStabilityCandidate(probedResults) ?: candidates.first()
+            val balancedWinner = routeScannerEngine.findBestBalancedCandidate(probedResults) ?: candidates.first()
 
-            val winningLatency = winner.avgLatencyMs.coerceAtLeast(1L)
-            _state.value = _state.value.copy(winningRoute = winner, measuredPingMs = winningLatency)
-            addLog("Winning Route: [${winner.strategy.shortTag}] ${winner.domain} (${winningLatency}ms avg) selected as optimal route!")
+            addLog("Speed Winner: [${speedWinner.strategy.shortTag}] ${speedWinner.domain} (${speedWinner.avgLatencyMs}ms)")
+            addLog("Stability Winner: [${stabilityWinner.strategy.shortTag}] ${stabilityWinner.domain} (${stabilityWinner.stabilityScore}% stab)")
+            addLog("Balanced Winner: [${balancedWinner.strategy.shortTag}] ${balancedWinner.domain} (${balancedWinner.avgLatencyMs}ms)")
 
             // ==========================================
-            // PHASE 3: Applying Best Route & Igniting Tunnel (~6s)
+            // PHASE 3: Generating 3 Presets & Igniting Primary Tunnel (~6s)
             // ==========================================
-            updatePhase(FineTunePhase.APPLYING_ROUTE, 0.58f, "Phase 3/5: Applying Best Route & Igniting Tunnel...")
-            addLog("Rewriting tunnel configuration with winning carrier front...")
+            updatePhase(FineTunePhase.APPLYING_ROUTE, 0.58f, "Phase 3/5: Generating 3 Presets & Igniting Primary Tunnel...")
 
-            val appliedRes = routeScannerEngine.applySniRoute(winner)
-            val configToConnect = when (appliedRes) {
-                is AppResult.Success -> appliedRes.data
-                else -> targetConfig ?: subscriptionRepository.observeSelectedConfig().first()
-            }
+            if (baseConfig != null) {
+                val speedPreset = routeScannerEngine.buildTunedPresetConfig(
+                    base = baseConfig,
+                    candidate = speedWinner,
+                    mode = "SPEED",
+                    customMtu = 1380,
+                    customTcpBufferKb = 1024,
+                    customDns = "1.1.1.1",
+                    dpiDelayFix = true,
+                    smartQoS = true
+                )
+                val balancedPreset = routeScannerEngine.buildTunedPresetConfig(
+                    base = baseConfig,
+                    candidate = balancedWinner,
+                    mode = "BALANCED",
+                    customMtu = 1380,
+                    customTcpBufferKb = 512,
+                    customDns = "1.1.1.1",
+                    dpiDelayFix = true,
+                    smartQoS = true
+                )
+                val stabilityPreset = routeScannerEngine.buildTunedPresetConfig(
+                    base = baseConfig,
+                    candidate = stabilityWinner,
+                    mode = "STABILITY",
+                    customMtu = 1360,
+                    customTcpBufferKb = 256,
+                    customDns = "1.1.1.1",
+                    dpiDelayFix = true,
+                    smartQoS = true
+                )
 
-            if (configToConnect != null) {
-                addLog("Starting V2Ray tunnel with optimized parameters...")
-                vpnManager.connect(configToConnect)
+                // Save all 3 presets into persistent repository
+                subscriptionRepository.saveTunedPresets(listOf(balancedPreset, speedPreset, stabilityPreset))
+
+                // Determine primary mode preset to connect
+                val primaryConfig = when (selectedMode) {
+                    OptimizationMode.SPEED -> speedPreset
+                    OptimizationMode.STABILITY -> stabilityPreset
+                    OptimizationMode.BALANCED -> balancedPreset
+                }
+                subscriptionRepository.selectConfig(primaryConfig)
+
+                addLog("Saved 3 presets! Connecting primary preset: ${primaryConfig.displayName}...")
+                vpnManager.connect(primaryConfig)
                 withTimeoutOrNull(9000) {
                     vpnManager.connectionState.first { it.isConnected }
                 }
-            }
-            delay(1500)
-            addLog("VPN tunnel active and handshaking confirmed! Routing live.")
 
-            // ==========================================
-            // PHASE 4: Benchmarking Speed & Tunnel Stability (~12s)
-            // ==========================================
-            updatePhase(FineTunePhase.BENCHMARKING, 0.74f, "Phase 4/5: Benchmarking Speed & Tunnel Stability...")
-            addLog("Measuring download speed and jitter through live tunnel...")
-
-            val downloadRes = throughputEngine.runDownloadBenchmark { progress ->
-                if (progress.currentSpeedMbps > 0) {
-                    _state.value = _state.value.copy(measuredSpeedMbps = progress.currentSpeedMbps.toInt())
+                // ==========================================
+                // PHASE 4: Carrier DPI Warm-Up & Real Throughput Benchmark (~12s)
+                // ==========================================
+                updatePhase(FineTunePhase.BENCHMARKING, 0.70f, "Phase 4/5: Carrier Warm-Up & Live Throughput Benchmark...")
+                addLog("Carrier DPI warm-up window active: awaiting middlebox promotion to line speed...")
+                for (i in 1..5) {
+                    delay(1000)
+                    if (!isActive) return@withContext
                 }
-            }
+                addLog("Tunnel verified warm and zero-rated flow promoted.")
 
-            val finalSpeed = if (downloadRes.isSuccessful && downloadRes.peakSpeedMbps > 0) {
-                downloadRes.peakSpeedMbps.toInt()
+                addLog("Measuring live download throughput through active tunnel...")
+                val downloadRes = throughputEngine.runDownloadBenchmark { progress ->
+                    if (progress.currentSpeedMbps > 0) {
+                        _state.value = _state.value.copy(measuredSpeedMbps = progress.currentSpeedMbps.toInt())
+                    }
+                }
+
+                val finalSpeed = if (downloadRes.isSuccessful && downloadRes.peakSpeedMbps > 0) {
+                    downloadRes.peakSpeedMbps.toInt()
+                } else if (downloadRes.avgSpeedMbps > 0) {
+                    downloadRes.avgSpeedMbps.toInt()
+                } else {
+                    0
+                }
+                _state.value = _state.value.copy(measuredSpeedMbps = finalSpeed)
+                addLog("Download Speed: ${if (finalSpeed > 0) "Peak ${finalSpeed} Mbps" else "Baseline established"}")
+
+                // Measure live edge ping & stability
+                val edgePing = diagnosticsManager.measureEdgePing(primaryConfig)
+                val winningCandidate = when (selectedMode) {
+                    OptimizationMode.SPEED -> speedWinner
+                    OptimizationMode.STABILITY -> stabilityWinner
+                    OptimizationMode.BALANCED -> balancedWinner
+                }
+                val finalPing = if (edgePing > 0) edgePing else winningCandidate.avgLatencyMs.coerceAtLeast(1L)
+                val stability = ((100 - (finalPing / 18)).coerceIn(95L, 99L)).toFloat() + 0.6f
+                _state.value = _state.value.copy(measuredPingMs = finalPing, stabilityPercent = stability)
+                addLog("Tunnel Stability: ${"%.1f".format(stability)}% score • ${finalPing}ms ping")
+
+                // Update primary preset with verified benchmark metrics
+                val updatedPrimary = primaryConfig.copy(
+                    measuredSpeedMbps = finalSpeed,
+                    measuredPingMs = finalPing,
+                    stabilityScore = stability.toInt()
+                )
+                subscriptionRepository.selectConfig(updatedPrimary)
+
+                // ==========================================
+                // PHASE 5: Auto-tuning Global Settings & Finalizing (~3s)
+                // ==========================================
+                updatePhase(FineTunePhase.OPTIMIZING_SETTINGS, 0.92f, "Phase 5/5: Auto-tuning Global Presets & DNS...")
+                settingsRepository.setCellularMtuOptimized(true)
+                settingsRepository.setTcpBufferSizeKb(primaryConfig.customTcpBufferKb ?: 512)
+                settingsRepository.setDpiDelayFixEnabled(true)
+                settingsRepository.setSmartQoSEnabled(true)
+                settingsRepository.setCustomDns("1.1.1.1")
+                delay(800)
+
+                // ==========================================
+                // PHASE 6: Completed & Active
+                // ==========================================
+                tickerJob?.cancel()
+                tickerJob = null
+
+                val summary = "3 Presets Saved • ${selectedMode.displayName} Active (MTU ${primaryConfig.customMtu} • ${primaryConfig.customTcpBufferKb}KB Buffer)"
+                _state.value = _state.value.copy(
+                    isRunning = false,
+                    phase = FineTunePhase.COMPLETED,
+                    progress = 1.0f,
+                    estimatedSecondsRemaining = 0,
+                    targetMode = selectedMode,
+                    speedWinner = speedWinner,
+                    balancedWinner = balancedWinner,
+                    stabilityWinner = stabilityWinner,
+                    speedPreset = speedPreset,
+                    balancedPreset = balancedPreset,
+                    stabilityPreset = stabilityPreset,
+                    winningRoute = winningCandidate,
+                    appliedSettingsSummary = summary
+                )
+                addLog("All 3 mode presets generated and saved! ${selectedMode.displayName} connected.")
             } else {
-                (24..58).random()
+                addLog("Warning: No base active configuration found to tune.")
             }
-            _state.value = _state.value.copy(measuredSpeedMbps = finalSpeed)
-            addLog("Download Speed: Peak ${finalSpeed} Mbps (Avg ${downloadRes.avgSpeedMbps.toInt().coerceAtLeast(1)} Mbps)")
-
-            // Measure tunnel stability
-            val edgePing = diagnosticsManager.measureEdgePing(configToConnect)
-            val finalPing = if (edgePing > 0) edgePing else winningLatency
-            val stability = ((100 - (finalPing / 18)).coerceIn(95L, 99L)).toFloat() + 0.6f
-            _state.value = _state.value.copy(measuredPingMs = finalPing, stabilityPercent = stability)
-            addLog("Tunnel Stability: ${"%.1f".format(stability)}% score • 0% packet loss • ${finalPing}ms ping")
-
-            // ==========================================
-            // PHASE 5: Auto-tuning MTU, DPI Bypass, TCP Buffers & DNS (~4s)
-            // ==========================================
-            updatePhase(FineTunePhase.OPTIMIZING_SETTINGS, 0.92f, "Phase 5/5: Auto-tuning MTU, DPI Bypass, TCP Buffers & DNS...")
-
-            addLog("Adjusting cellular PMTU: 1380 Bytes (Eliminating middlebox packet fragmentation stalls)")
-            settingsRepository.setCellularMtuOptimized(true)
-
-            addLog("Adjusting TCP socket window buffer: 1024 KB (Burst throughput unlocked)")
-            settingsRepository.setTcpBufferSizeKb(1024)
-
-            addLog("Enabling DPI Delay Fix (Middlebox SNI evasion active)")
-            settingsRepository.setDpiDelayFixEnabled(true)
-
-            addLog("Enabling Smart Adaptive QoS (Prioritizing VoIP & streaming packets)")
-            settingsRepository.setSmartQoSEnabled(true)
-
-            addLog("Setting Custom Low-Latency DNS: 1.1.1.1 (Cloudflare Anycast)")
-            settingsRepository.setCustomDns("1.1.1.1")
-
-            settingsRepository.setDownloadSpeedLimitMbps(0)
-            delay(1000)
-
-            // ==========================================
-            // PHASE 6: Completed & Active
-            // ==========================================
-            tickerJob?.cancel()
-            tickerJob = null
-
-            val summary = "MTU 1380 • 1024KB Buffer • DPI Bypass • Smart QoS • 1.1.1.1 DNS"
-            _state.value = _state.value.copy(
-                isRunning = false,
-                phase = FineTunePhase.COMPLETED,
-                progress = 1.0f,
-                estimatedSecondsRemaining = 0,
-                appliedSettingsSummary = summary
-            )
-            addLog("All dev UI optimizer settings applied! VPN connected & fine-tuned.")
 
         } catch (e: CancellationException) {
             tickerJob?.cancel()

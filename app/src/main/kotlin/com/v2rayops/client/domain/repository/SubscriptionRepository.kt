@@ -10,6 +10,7 @@ interface SubscriptionRepository {
     fun selectConfig(config: VpnConfig)
     fun importManualConfig(rawUri: String): AppResult<VpnConfig>
     fun deleteConfig(configId: Long)
+    fun saveTunedPresets(presets: List<VpnConfig>)
     suspend fun syncConfigs(customerCode: String): AppResult<List<VpnConfig>>
     suspend fun sendHeartbeat(uploadBytes: Long, downloadBytes: Long, deviceName: String?): AppResult<Boolean>
 }

@@ -718,6 +718,159 @@ class RouteScannerEngine @Inject constructor(
     }
 
     /**
+     * Triple-Mode Presets Candidate Evaluators:
+     * Discovers 3 distinct best candidates for SPEED, STABILITY, and BALANCED modes.
+     */
+    fun findBestSpeedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
+        val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+        if (passing.isEmpty()) return candidates.firstOrNull()
+        return passing
+            .filter { it.strategy == RouteStrategy.STANDARD_SNI && it.stabilityScore >= 50 }
+            .minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
+            ?: passing.minByOrNull { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: 9999L }
+    }
+
+    fun findBestStabilityCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
+        val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+        if (passing.isEmpty()) return candidates.firstOrNull()
+        return passing
+            .filter { it.strategy == RouteStrategy.STANDARD_SNI }
+            .sortedWith(
+                compareByDescending<SniRouteCandidate> { it.stabilityScore }
+                    .thenBy { it.packetLossPercent }
+                    .thenBy { it.jitterMs }
+                    .thenBy { it.avgLatencyMs.takeIf { lat -> lat > 0 } ?: Long.MAX_VALUE }
+            ).firstOrNull()
+            ?: passing.sortedWith(
+                compareByDescending<SniRouteCandidate> { it.stabilityScore }
+                    .thenBy { it.packetLossPercent }
+                    .thenBy { it.jitterMs }
+            ).firstOrNull()
+    }
+
+    fun findBestBalancedCandidate(candidates: List<SniRouteCandidate>): SniRouteCandidate? {
+        val passing = candidates.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
+        if (passing.isEmpty()) return candidates.firstOrNull()
+        fun score(c: SniRouteCandidate): Double {
+            val latClamped = c.avgLatencyMs.coerceIn(10L, 500L)
+            val latScore = (500L - latClamped).toDouble() / 500.0 * 40.0
+            val stabScore = c.stabilityScore.toDouble() * 0.6
+            val strategyBonus = if (c.strategy == RouteStrategy.STANDARD_SNI) 10.0 else 0.0
+            return stabScore + latScore + strategyBonus
+        }
+        return passing.maxByOrNull { score(it) }
+    }
+
+    fun buildTunedPresetConfig(
+        base: VpnConfig,
+        candidate: SniRouteCandidate,
+        mode: String,
+        customMtu: Int,
+        customTcpBufferKb: Int,
+        customDns: String = "1.1.1.1",
+        dpiDelayFix: Boolean = true,
+        smartQoS: Boolean = true
+    ): VpnConfig {
+        var updatedUri = base.configUri
+        val targetPort = candidate.targetPort
+        val isTls = CommonProxyPorts.isTlsPort(targetPort)
+        val securityVal = if (isTls) "tls" else "none"
+
+        if (base.isVmess) {
+            try {
+                val base64Content = updatedUri.removePrefix("vmess://").trim()
+                val jsonStr = String(Base64.getUrlDecoder().decode(base64Content), Charsets.UTF_8)
+                val json = JSONObject(jsonStr)
+
+                if (candidate.strategy == RouteStrategy.ADDR_SNI) {
+                    json.put("add", candidate.domain)
+                    json.put("port", targetPort)
+                    json.put("sni", if (isTls) candidate.wsHost else "")
+                    json.put("host", candidate.wsHost)
+                    json.put("tls", securityVal)
+                    json.put("insecure", isTls)
+                } else {
+                    json.put("add", DEFAULT_VPS_DOMAIN)
+                    json.put("port", targetPort)
+                    json.put("sni", if (isTls) candidate.domain else "")
+                    json.put("host", candidate.wsHost)
+                    json.put("tls", securityVal)
+                    json.put("insecure", isTls)
+                }
+                val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(json.toString().toByteArray(Charsets.UTF_8))
+                updatedUri = "vmess://$encoded"
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "Failed to update VMess URI for preset $mode: ${e.message}")
+            }
+        } else {
+            if (candidate.strategy == RouteStrategy.ADDR_SNI) {
+                updatedUri = replaceAddressAndPort(updatedUri, candidate.domain, targetPort)
+                updatedUri = replaceQueryParam(updatedUri, "security", securityVal)
+                if (isTls) {
+                    updatedUri = replaceQueryParam(updatedUri, "sni", candidate.wsHost)
+                    updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+                } else {
+                    updatedUri = removeQueryParam(updatedUri, "sni")
+                    updatedUri = removeQueryParam(updatedUri, "allowInsecure")
+                }
+                updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+            } else {
+                updatedUri = replaceAddressAndPort(updatedUri, DEFAULT_VPS_DOMAIN, targetPort)
+                updatedUri = replaceQueryParam(updatedUri, "security", securityVal)
+                if (isTls) {
+                    updatedUri = replaceQueryParam(updatedUri, "sni", candidate.domain)
+                    updatedUri = replaceQueryParam(updatedUri, "allowInsecure", "true")
+                } else {
+                    updatedUri = removeQueryParam(updatedUri, "sni")
+                    updatedUri = removeQueryParam(updatedUri, "allowInsecure")
+                }
+                updatedUri = replaceQueryParam(updatedUri, "host", candidate.wsHost)
+            }
+        }
+
+        val parsed = profileParser.parseUri(updatedUri)
+        val cleanName = base.displayName
+            .substringBefore(" [Balanced]")
+            .substringBefore(" [Speed]")
+            .substringBefore(" [Stability]")
+            .substringBefore(" [")
+
+        val modeTag = when (mode.uppercase()) {
+            "SPEED" -> "Speed"
+            "STABILITY" -> "Stability"
+            else -> "Balanced"
+        }
+        val presetName = "$cleanName [$modeTag]"
+
+        val modeOffset = when (mode.uppercase()) {
+            "SPEED" -> 1000L
+            "STABILITY" -> 2000L
+            else -> 0L
+        }
+        val presetId = if (base.id > 1000000000L) base.id + modeOffset else base.id * 1000L + modeOffset
+
+        return base.copy(
+            id = presetId,
+            configUri = updatedUri,
+            host = parsed?.host ?: base.host,
+            port = parsed?.port ?: base.port,
+            sni = parsed?.sni ?: base.sni,
+            wsHost = parsed?.wsHost ?: base.wsHost,
+            wsPath = parsed?.wsPath ?: base.wsPath,
+            configName = presetName,
+            remark = presetName,
+            tuningMode = mode.uppercase(),
+            customMtu = customMtu,
+            customTcpBufferKb = customTcpBufferKb,
+            customDns = customDns,
+            dpiDelayFix = dpiDelayFix,
+            smartQoS = smartQoS,
+            measuredPingMs = candidate.avgLatencyMs.takeIf { it > 0 } ?: candidate.latencyMs,
+            stabilityScore = candidate.stabilityScore
+        )
+    }
+
+    /**
      * Applies the selected candidate to the active V2Ray configuration.
      * Rewrites destination address, target port, SNI, and WS Host parameters and cleanly reloads the tunnel.
      */

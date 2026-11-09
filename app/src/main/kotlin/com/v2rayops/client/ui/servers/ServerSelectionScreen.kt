@@ -348,18 +348,51 @@ private fun NodeCardItem(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Center details: Title + ISP & Limit Subtitle
+            // Center details: Title + Mode Badge + ISP & Limit Subtitle
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = config.displayName,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = config.displayName,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (!config.tuningMode.isNullOrEmpty()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val (badgeBg, badgeBorder, badgeText) = when (config.tuningMode.uppercase()) {
+                            "SPEED" -> Triple(Color(0xFF1E1B4B), Color(0xFF4338CA), Color(0xFF818CF8))
+                            "STABILITY" -> Triple(Color(0xFF064E3B), Color(0xFF059669), Color(0xFF34D399))
+                            else -> Triple(Color(0xFF2E1065), Color(0xFF7C3AED), Color(0xFFC084FC))
+                        }
+                        val bufferKb = config.customTcpBufferKb ?: when (config.tuningMode.uppercase()) {
+                            "SPEED" -> 1024
+                            "STABILITY" -> 256
+                            else -> 512
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(badgeBg)
+                                .border(0.5.dp, badgeBorder, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = "${config.tuningMode.uppercase()} • ${bufferKb}KB",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = badgeText
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
