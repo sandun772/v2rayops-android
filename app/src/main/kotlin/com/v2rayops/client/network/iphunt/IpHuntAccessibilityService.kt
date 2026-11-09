@@ -2,14 +2,22 @@ package com.v2rayops.client.network.iphunt
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.graphics.Path
+import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
 import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.v2rayops.client.MainActivity
 import com.v2rayops.client.core.logger.AppLogger
 import kotlinx.coroutines.CoroutineScope
@@ -76,10 +84,90 @@ class IpHuntAccessibilityService : AccessibilityService() {
         AppLogger.w("IpHuntAccessibility", "Accessibility service interrupted.")
     }
 
+    private var maskView: View? = null
+    private val windowManager by lazy { getSystemService(Context.WINDOW_SERVICE) as WindowManager }
+
+    private suspend fun showMaskOverlay() = withContext(Dispatchers.Main) {
+        if (maskView != null) return@withContext
+        try {
+            val layout = FrameLayout(this@IpHuntAccessibilityService).apply {
+                setBackgroundColor(0xFF050811.toInt()) // Exact cosmic obsidian matching V2RayOps HUD
+
+                val centerContent = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                }
+
+                val title = TextView(context).apply {
+                    text = "• CYCLING AIRPLANE MODE •"
+                    setTextColor(0xFFFB7185.toInt())
+                    textSize = 14f
+                    gravity = Gravity.CENTER
+                    typeface = android.graphics.Typeface.MONOSPACE
+                }
+
+                val subtitle = TextView(context).apply {
+                    text = "Rotating cellular IP session..."
+                    setTextColor(0xFF94A3B8.toInt())
+                    textSize = 12f
+                    gravity = Gravity.CENTER
+                    setPadding(0, 16, 0, 0)
+                    typeface = android.graphics.Typeface.MONOSPACE
+                }
+
+                centerContent.addView(title)
+                centerContent.addView(subtitle)
+
+                val centerParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER
+                )
+                addView(centerContent, centerParams)
+            }
+
+            val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+            }
+
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                overlayType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+            )
+
+            windowManager.addView(layout, params)
+            maskView = layout
+        } catch (e: Exception) {
+            AppLogger.w("IpHuntAccessibility", "Could not show mask overlay: ${e.message}")
+        }
+    }
+
+    private suspend fun hideMaskOverlay() = withContext(Dispatchers.Main) {
+        try {
+            maskView?.let {
+                windowManager.removeView(it)
+                maskView = null
+            }
+        } catch (_: Exception) {}
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         activeCycleJob?.cancel()
         serviceScope.cancel()
+        try {
+            maskView?.let { windowManager.removeView(it) }
+        } catch (_: Exception) {}
+        maskView = null
         if (instance === this) {
             instance = null
         }
@@ -87,35 +175,30 @@ class IpHuntAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Executes one complete automated Airplane Mode toggle cycle:
-     * 1. Opens Settings and navigates directly to Airplane Mode
-     * 2. Toggles Airplane Mode ON (confirmed via Settings.Global)
-     * 3. Waits 1.6s for carrier tower disconnection
-     * 4. Toggles Airplane Mode OFF (confirmed via Settings.Global)
-     * 5. Smoothly returns to V2RayOps
-     */
-    /**
      * Changes Airplane Mode directly to targetState (true = ON, false = OFF)
-     * using direct Settings drill-down with automatic Quick Settings tile fallback.
-     * Brings V2RayOps back to front when done.
+     * without exposing the Settings activity to the user (seamless overlay).
      */
     suspend fun setAirplaneMode(targetState: Boolean): Boolean {
         if (isAirplaneModeOn(this) == targetState) return true
 
         AppLogger.i("IpHuntAccessibility", "setAirplaneMode -> $targetState requested...")
 
-        // Attempt 1: Direct Settings Screen drill-down
-        var reached = executeSettingsToggleTo(targetState)
+        showMaskOverlay()
 
-        // Attempt 2: Quick Settings tile fallback
-        if (!reached || isAirplaneModeOn(this) != targetState) {
-            AppLogger.w("IpHuntAccessibility", "Settings toggle did not achieve $targetState. Trying Quick Settings...")
-            executeQuickSettingsToggleTo(targetState)
+        try {
+            // Attempt 1: Direct Settings Screen drill-down
+            var reached = executeSettingsToggleTo(targetState)
+
+            // Attempt 2: Quick Settings tile fallback
+            if (!reached || isAirplaneModeOn(this) != targetState) {
+                AppLogger.w("IpHuntAccessibility", "Settings toggle did not achieve $targetState. Trying Quick Settings...")
+                executeQuickSettingsToggleTo(targetState)
+            }
+        } finally {
+            bringV2RayOpsToFront()
+            delay(120)
+            hideMaskOverlay()
         }
-
-        // Return to V2RayOps smoothly
-        delay(200)
-        bringV2RayOpsToFront()
 
         val finalResult = isAirplaneModeOn(this) == targetState
         AppLogger.i("IpHuntAccessibility", "setAirplaneMode -> $targetState result: $finalResult")
@@ -130,7 +213,7 @@ class IpHuntAccessibilityService : AccessibilityService() {
             list.add(
                 Intent().apply {
                     setClassName("com.android.settings", "com.android.settings.Settings\$ExtraNetworkConnectionActivity")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
                 }
             )
         }
@@ -138,21 +221,21 @@ class IpHuntAccessibilityService : AccessibilityService() {
         // 2. Standard Android Airplane Mode settings
         list.add(
             Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
             }
         )
 
         // 3. Wireless settings
         list.add(
             Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
             }
         )
 
         // 4. Main Settings fallback
         list.add(
             Intent(Settings.ACTION_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
             }
         )
 
@@ -168,21 +251,22 @@ class IpHuntAccessibilityService : AccessibilityService() {
             if (isAirplaneModeOn(this) == targetState) return true
 
             try {
-                startActivity(intent)
+                val bundle = ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle()
+                startActivity(intent, bundle)
             } catch (_: Exception) {
                 continue
             }
 
-            delay(350)
+            delay(100)
 
             var switchNode: AccessibilityNodeInfo? = null
             var switchBounds = Rect()
 
             val searchStart = System.currentTimeMillis()
-            while (System.currentTimeMillis() - searchStart < 3500L) {
+            while (System.currentTimeMillis() - searchStart < 2500L) {
                 if (isAirplaneModeOn(this) == targetState) return true
 
-                val root = rootInActiveWindow
+                val root = getActiveOrSettingsRoot()
                 if (root != null) {
                     val found = findAirplaneSwitchAndBounds(root)
                     if (found != null) {
@@ -192,11 +276,11 @@ class IpHuntAccessibilityService : AccessibilityService() {
                     }
                     val clicked = clickNetworkCategoryIfPresent(root)
                     if (clicked) {
-                        delay(400)
+                        delay(250)
                         continue
                     }
                 }
-                delay(120)
+                delay(80)
             }
 
             if (switchNode != null && !switchBounds.isEmpty) {
@@ -204,15 +288,15 @@ class IpHuntAccessibilityService : AccessibilityService() {
                     clickSwitch(switchNode, switchBounds)
 
                     val waitStart = System.currentTimeMillis()
-                    while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - waitStart < 1200L) {
-                        delay(50)
+                    while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - waitStart < 800L) {
+                        delay(40)
                     }
 
                     if (isAirplaneModeOn(this) != targetState && !switchBounds.isEmpty) {
                         switchNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                         val retryStart = System.currentTimeMillis()
-                        while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - retryStart < 1200L) {
-                            delay(50)
+                        while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - retryStart < 1000L) {
+                            delay(40)
                         }
                     }
                 }
@@ -224,6 +308,23 @@ class IpHuntAccessibilityService : AccessibilityService() {
         }
 
         return isAirplaneModeOn(this) == targetState
+    }
+
+    private fun getActiveOrSettingsRoot(): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow
+        if (root != null) return root
+
+        try {
+            val wins = windows
+            for (w in wins) {
+                val r = w.root ?: continue
+                val pkg = r.packageName?.toString() ?: ""
+                if (pkg.contains("settings")) {
+                    return r
+                }
+            }
+        } catch (_: Exception) {}
+        return null
     }
 
     private suspend fun executeQuickSettingsToggleTo(targetState: Boolean): Boolean {
@@ -460,9 +561,10 @@ class IpHuntAccessibilityService : AccessibilityService() {
     private fun bringV2RayOpsToFront() {
         try {
             val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION
             }
-            startActivity(intent)
+            val bundle = ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle()
+            startActivity(intent, bundle)
         } catch (_: Exception) {
             performGlobalAction(GLOBAL_ACTION_BACK)
         }
