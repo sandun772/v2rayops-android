@@ -241,16 +241,16 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .pointerInput(quickAuditState.isRunning) {
-                    if (quickAuditState.isRunning) return@pointerInput
-
+                .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        // Disallow pull if page is scrolled down
-                        if (scrollState.value > 8) return@awaitEachGesture
+
+                        // If audit is currently active, ignore new pull triggers
+                        if (viewModel.quickAuditState.value.isRunning) return@awaitEachGesture
 
                         isRetestMode = isHiddenWidgetVisible
                         val startY = down.position.y
+                        var overscrollStartY: Float? = if (scrollState.value <= 6) down.position.y else null
                         var armed = false
 
                         try {
@@ -261,31 +261,48 @@ fun DashboardScreen(
                                     break
                                 }
 
-                                // If test was already fired during this hold, wait for finger to be lifted!
-                                if (isTriggerLockedUntilRelease) {
+                                if (isTriggerLockedUntilRelease || viewModel.quickAuditState.value.isRunning) {
                                     pullDistance = 0f
                                     continue
                                 }
 
-                                val deltaY = pointer.position.y - startY
-                                if (deltaY > 0 && scrollState.value <= 8) {
-                                    // Smooth responsive pull damping (natural 20px swipe activates)
-                                    val damped = (deltaY * 0.5f).coerceIn(0f, 60f)
-                                    pullDistance = damped
-                                    if (damped >= 10f && !armed) {
-                                        armed = true
-                                        isCharging = true
-                                    } else if (damped < 4f && armed) {
-                                        armed = false
-                                        isCharging = false
+                                val currentY = pointer.position.y
+                                val totalDeltaY = currentY - startY
+
+                                // If user reached the top during this downward swipe, lock in overscroll anchor
+                                if (scrollState.value <= 2 && overscrollStartY == null && totalDeltaY > 0) {
+                                    overscrollStartY = currentY
+                                }
+
+                                if (overscrollStartY != null && scrollState.value <= 6) {
+                                    val pullDelta = currentY - overscrollStartY
+                                    if (armed) {
+                                        // Keep pill comfortably open while charging (at least 28dp), tracking gently up to 60dp
+                                        val activePull = (pullDelta * 0.45f).coerceIn(28f, 60f)
+                                        pullDistance = activePull
+
+                                        // Cancel if user explicitly swipes upward
+                                        if (pullDelta < 4f) {
+                                            armed = false
+                                            isCharging = false
+                                            pullDistance = 0f
+                                        }
+                                    } else {
+                                        if (pullDelta > 0) {
+                                            val damped = (pullDelta * 0.45f).coerceIn(0f, 60f)
+                                            pullDistance = damped
+                                            if (damped >= 12f) {
+                                                armed = true
+                                                isCharging = true
+                                            }
+                                        }
                                     }
-                                } else if (deltaY < -30f) {
-                                    // Intentional upward scroll
+                                } else if (totalDeltaY < -35f && !armed) {
+                                    // User is deliberately scrolling down into dashboard content
                                     break
                                 }
                             }
                         } finally {
-                            armed = false
                             isCharging = false
                             isTriggerLockedUntilRelease = false
                             pullDistance = 0f
