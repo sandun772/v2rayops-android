@@ -204,15 +204,15 @@ class IpHuntAccessibilityService : AccessibilityService() {
                     clickSwitch(switchNode, switchBounds)
 
                     val waitStart = System.currentTimeMillis()
-                    while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - waitStart < 1500L) {
-                        delay(100)
+                    while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - waitStart < 1200L) {
+                        delay(50)
                     }
 
                     if (isAirplaneModeOn(this) != targetState && !switchBounds.isEmpty) {
-                        dispatchTouchTap(switchBounds.centerX().toFloat(), switchBounds.centerY().toFloat())
+                        switchNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                         val retryStart = System.currentTimeMillis()
-                        while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - retryStart < 1500L) {
-                            delay(100)
+                        while (isAirplaneModeOn(this) != targetState && System.currentTimeMillis() - retryStart < 1200L) {
+                            delay(50)
                         }
                     }
                 }
@@ -383,7 +383,7 @@ class IpHuntAccessibilityService : AccessibilityService() {
                         if (child.isCheckable || cName.contains("Switch") || cName.contains("Button") || id.contains("checkbox") || id.contains("switch")) {
                             val rect = Rect()
                             child.getBoundsInScreen(rect)
-                            if (!rect.isEmpty && rect.top >= rowRect.top - 80 && rect.bottom <= rowRect.bottom + 80) {
+                            if (!rect.isEmpty && kotlin.math.abs(rect.centerY() - rowRect.centerY()) <= 80) {
                                 return Pair(child, rect)
                             }
                         }
@@ -396,7 +396,7 @@ class IpHuntAccessibilityService : AccessibilityService() {
                 for (s in allSwitches) {
                     val sRect = Rect()
                     s.getBoundsInScreen(sRect)
-                    if (sRect.top >= rowRect.top - 80 && sRect.bottom <= rowRect.bottom + 80) {
+                    if (kotlin.math.abs(sRect.centerY() - rowRect.centerY()) <= 80) {
                         return Pair(s, sRect)
                     }
                 }

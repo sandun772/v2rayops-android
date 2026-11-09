@@ -300,39 +300,17 @@ class DashboardViewModel @Inject constructor(
                     break
                 }
 
-                // Initial safety: If Airplane Mode is currently ON, turn it OFF first
+                // Clean disconnect if currently connected
+                if (connectionState.value.isConnected || connectionState.value.isConnecting) {
+                    vpnManager.disconnect()
+                    delay(250)
+                }
+
+                // Safety check: If Airplane Mode is currently ON before hunt starts, turn it OFF first
                 if (ipHuntManager.isAirplaneModeOn()) {
                     _smartHuntProgress.value = SmartHuntProgress(SmartHuntStage.TURNING_OFF_AIRPLANE, currentCycle = cycleCount)
                     ipHuntManager.ensureAirplaneModeOff()
-                }
-
-                // Initial Cycle: If mobile network is already connected and Airplane mode is OFF, check current VPN first!
-                if (cycleCount == 1 && !ipHuntManager.isAirplaneModeOn()) {
-                    val currentIp = ipHuntManager.getMobileDataIp()
-                    _smartHuntProgress.value = SmartHuntProgress(
-                        stage = SmartHuntStage.CHECKING_VPN,
-                        currentCycle = cycleCount,
-                        assignedIp = currentIp
-                    )
-
-                    AppLogger.i("SmartHunt", "Initial check: Testing VPN traffic on current IP ($currentIp)...")
-                    if (connectionState.value.isConnected || connectionState.value.isConnecting) {
-                        vpnManager.disconnect()
-                        delay(300)
-                    }
-                    vpnManager.connect(config)
-
-                    val initialWorking = verifyVpnWorkingWithTimeout(timeoutMs = 4500L)
-                    if (initialWorking) {
-                        AppLogger.i("SmartHunt", "Current IP $currentIp passed traffic! Hunt complete.")
-                        _isSmartHunting.value = false
-                        _smartHuntProgress.value = SmartHuntProgress(SmartHuntStage.SUCCESS, assignedIp = currentIp)
-                        break
-                    }
-
-                    AppLogger.w("SmartHunt", "Current IP $currentIp failed traffic. Proceeding to cycle Airplane Mode...")
-                    vpnManager.disconnect()
-                    delay(300)
+                    delay(500)
                 }
 
                 if (!isActive || !_isSmartHunting.value) break
