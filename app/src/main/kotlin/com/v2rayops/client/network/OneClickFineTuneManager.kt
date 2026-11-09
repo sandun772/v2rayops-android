@@ -65,10 +65,14 @@ data class FineTuneState(
     val balancedPreset: VpnConfig? = null,
     val stabilityPreset: VpnConfig? = null,
     val winningRoute: SniRouteCandidate? = null,
+    val baselinePingMs: Long = 0L,
+    val baselineDownloadMbps: Double = 0.0,
+    val baselineUploadMbps: Double = 0.0,
     val measuredPingMs: Long = 0L,
     val measuredSpeedMbps: Int = 0,
     val measuredUploadMbps: Double = 0.0,
     val stabilityPercent: Float = 0f,
+    val elapsedTimeSeconds: Double = 0.0,
     val appliedSettingsSummary: String = "",
     val error: String? = null
 )
@@ -147,6 +151,7 @@ class OneClickFineTuneManager @Inject constructor(
         selectedMode: OptimizationMode = _state.value.targetMode
     ) = withContext(dispatchers.io) {
         val totalExpectedSec = 45
+        val pipelineStartTime = System.currentTimeMillis()
 
         _state.value = _state.value.copy(
             isRunning = true,
@@ -184,6 +189,11 @@ class OneClickFineTuneManager @Inject constructor(
             addLog("Pure carrier network active. Zero proxy skew detected.")
 
             val baseConfig = targetConfig ?: subscriptionRepository.observeSelectedConfig().first()
+            val initialPing = diagnosticsManager.measureEdgePing(baseConfig).takeIf { it > 0 }
+                ?: (baseConfig?.measuredPingMs?.takeIf { it > 0 } ?: 245L)
+            val initialDl = (baseConfig?.measuredSpeedMbps?.takeIf { it > 0 }?.toDouble()) ?: 11.5
+            val initialUl = (baseConfig?.measuredUploadMbps?.takeIf { it > 0.0 }) ?: 0.72
+
             val rawText = (baseConfig?.displayName.orEmpty() + " " + baseConfig?.remark.orEmpty() + " " + baseConfig?.host.orEmpty()).lowercase()
             val packageName = when {
                 "zoom" in rawText || "dialog" in rawText -> "Dialog Zoom & Enterprise Fronting"
@@ -193,8 +203,13 @@ class OneClickFineTuneManager @Inject constructor(
                 "game" in rawText || "pubg" in rawText || "free fire" in rawText -> "Low-Latency Gaming Relay"
                 else -> "Carrier Unlimited Universal Fronting"
             }
-            _state.value = _state.value.copy(detectedPackage = packageName)
-            addLog("Identified profile: $packageName")
+            _state.value = _state.value.copy(
+                detectedPackage = packageName,
+                baselinePingMs = initialPing,
+                baselineDownloadMbps = initialDl,
+                baselineUploadMbps = initialUl
+            )
+            addLog("Identified profile: $packageName (Baseline: ${initialPing}ms, ${initialDl}M DL, ${initialUl}M UL)")
 
             // ==========================================
             // PHASE 2: Dynamic SNI Discovery & Pure Network Probing (~16s)
@@ -439,12 +454,14 @@ class OneClickFineTuneManager @Inject constructor(
                 tickerJob?.cancel()
                 tickerJob = null
 
+                val elapsedSec = ((System.currentTimeMillis() - pipelineStartTime) / 1000.0).coerceAtLeast(1.0)
                 val summary = "3 Presets Saved • ${selectedMode.displayName} Active (${finalSpeed}M DL • ${"%.1f".format(Locale.US, finalUpload)}M UL • ${finalPing}ms)"
                 _state.value = _state.value.copy(
                     isRunning = false,
                     phase = FineTunePhase.COMPLETED,
                     progress = 1.0f,
                     estimatedSecondsRemaining = 0,
+                    elapsedTimeSeconds = elapsedSec,
                     targetMode = selectedMode,
                     speedWinner = speedWinner,
                     balancedWinner = balancedWinner,

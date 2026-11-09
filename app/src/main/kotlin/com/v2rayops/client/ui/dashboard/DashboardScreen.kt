@@ -97,6 +97,7 @@ fun DashboardScreen(
     var chargeProgress by remember { mutableFloatStateOf(0f) }
     var isHiddenWidgetVisible by remember { mutableStateOf(false) }
     var isRetestMode by remember { mutableStateOf(false) }
+    var isTriggerLockedUntilRelease by remember { mutableStateOf(false) }
 
     val animatedPullOffset by animateFloatAsState(
         targetValue = pullDistance,
@@ -138,6 +139,7 @@ fun DashboardScreen(
                     isCharging = false
                     pullDistance = 0f
                     chargeProgress = 0f
+                    isTriggerLockedUntilRelease = true
                     viewModel.startQuickAudit()
                     break
                 }
@@ -209,11 +211,13 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .pointerInput(Unit) {
+                .pointerInput(quickAuditState.isRunning) {
+                    if (quickAuditState.isRunning) return@pointerInput
+
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        // Disallow pull if scrolled down OR if speed test is currently running
-                        if (scrollState.value > 0 || quickAuditState.isRunning) return@awaitEachGesture
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        // Disallow pull if page is scrolled down
+                        if (scrollState.value > 8) return@awaitEachGesture
 
                         isRetestMode = isHiddenWidgetVisible
                         val startY = down.position.y
@@ -228,28 +232,32 @@ fun DashboardScreen(
                                 }
 
                                 // If test was already fired during this hold, wait for finger to be lifted!
-                                if (!isCharging && armed) {
+                                if (isTriggerLockedUntilRelease) {
+                                    pullDistance = 0f
                                     continue
                                 }
 
                                 val deltaY = pointer.position.y - startY
-                                if (deltaY > 0 && scrollState.value == 0) {
-                                    val damped = (deltaY * 0.35f).coerceIn(0f, 55f)
+                                if (deltaY > 0 && scrollState.value <= 8) {
+                                    // Smooth responsive pull damping (natural 20px swipe activates)
+                                    val damped = (deltaY * 0.5f).coerceIn(0f, 60f)
                                     pullDistance = damped
-                                    if (damped >= 22f && !armed) {
+                                    if (damped >= 10f && !armed) {
                                         armed = true
                                         isCharging = true
-                                    } else if (damped < 12f && armed) {
+                                    } else if (damped < 4f && armed) {
                                         armed = false
                                         isCharging = false
                                     }
-                                } else if (deltaY < -5f) {
+                                } else if (deltaY < -30f) {
+                                    // Intentional upward scroll
                                     break
                                 }
                             }
                         } finally {
                             armed = false
                             isCharging = false
+                            isTriggerLockedUntilRelease = false
                             pullDistance = 0f
                             chargeProgress = 0f
                         }
