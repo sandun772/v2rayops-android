@@ -122,10 +122,10 @@ fun DashboardScreen(
         }
     }
 
-    // 3-second hold countdown effect
+    // 1-second hold countdown effect
     LaunchedEffect(isCharging) {
         if (isCharging) {
-            val durationMs = 3000L
+            val durationMs = 1000L
             val startTime = System.currentTimeMillis()
             while (isCharging) {
                 val elapsed = System.currentTimeMillis() - startTime

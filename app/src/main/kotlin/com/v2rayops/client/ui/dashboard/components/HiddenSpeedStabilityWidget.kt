@@ -100,9 +100,9 @@ fun PullDownChargingPill(
                     }
                 }
 
-                val remainingSec = (3.0f * (1.0f - chargeProgress)).coerceAtLeast(0f)
+                val remainingSec = (1.0f * (1.0f - chargeProgress)).coerceAtLeast(0f)
                 Text(
-                    text = if (chargeProgress >= 1f) "READY" else "HOLD 3S FOR AUDIT (${"%.1f".format(Locale.US, remainingSec)}s)",
+                    text = if (chargeProgress >= 1f) "READY" else "HOLD 1S FOR AUDIT (${"%.1f".format(Locale.US, remainingSec)}s)",
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
