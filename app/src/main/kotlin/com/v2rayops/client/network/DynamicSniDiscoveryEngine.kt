@@ -7,7 +7,9 @@ import com.v2rayops.client.domain.model.VpnConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -84,9 +86,38 @@ class DynamicSniDiscoveryEngine @Inject constructor(
             "nie.lk"
         )
 
+        // Netflix Zero-Rated & Fast.com CDN Ecosystem
+        private val NETFLIX_ECOSYSTEM = listOf(
+            "fast.com",
+            "netflix.com",
+            "www.netflix.com",
+            "api-global.netflix.com",
+            "assets.nflxext.com",
+            "nflxvideo.net",
+            "nflximg.net",
+            "nflxext.com",
+            "nflxso.net",
+            "customerevents.netflix.com"
+        )
+
+        // Telegram Zero-Rated Messenger Ecosystem
+        private val TELEGRAM_ECOSYSTEM = listOf(
+            "t.me",
+            "telegram.org",
+            "www.telegram.org",
+            "web.telegram.org",
+            "telesco.pe",
+            "cdn1.telesco.pe",
+            "cdn4.telesco.pe",
+            "cdn5.telesco.pe",
+            "core.telegram.org",
+            "api.telegram.org"
+        )
+
         // TikTok Zero-Rated CDN Ecosystem
         private val TIKTOK_ECOSYSTEM = listOf(
             "tiktok.com",
+            "www.tiktok.com",
             "tiktokv.com",
             "byteoversea.com",
             "ibyteimg.com",
@@ -94,20 +125,36 @@ class DynamicSniDiscoveryEngine @Inject constructor(
             "tiktokcdn.com",
             "p16-va.tiktokcdn.com",
             "v16m.tiktokcdn.com",
-            "api.tiktokv.com"
+            "api.tiktokv.com",
+            "v16-webapp-prime.tiktok.com",
+            "lf16-pkgcdn.byteoversea.com",
+            "mon.snssdk.com",
+            "log.byteoversea.com",
+            "api16-core-va.tiktokv.com",
+            "lf-tk-sg.ibytedtos.com",
+            "sf16-muse-va.ibytedtos.com",
+            "p16-sign-va.tiktokcdn.com"
         )
 
         // WhatsApp & Meta Social Ecosystem
         private val WHATSAPP_SOCIAL_ECOSYSTEM = listOf(
             "whatsapp.com",
+            "www.whatsapp.com",
+            "web.whatsapp.com",
             "whatsapp.net",
             "static.whatsapp.net",
             "media.whatsapp.net",
-            "web.whatsapp.com",
+            "g.whatsapp.net",
+            "v.whatsapp.net",
+            "mmg.whatsapp.net",
+            "crashlogs.whatsapp.net",
+            "wa.me",
             "facebook.com",
             "fbcdn.net",
             "instagram.com",
-            "cdninstagram.com"
+            "cdninstagram.com",
+            "graph.facebook.com",
+            "edge-chat.facebook.com"
         )
 
         // YouTube & Google Video Ecosystem
@@ -160,35 +207,72 @@ class DynamicSniDiscoveryEngine @Inject constructor(
         onLog("Analyzing configuration profile package: '$rawPackageText'...")
         val seedDomains = mutableSetOf<String>()
 
-        // 1. Expand ecosystem based on detected package keywords
+        // 1. Prioritized Package Detection (Service-specific keywords take precedence over generic carrier names)
+        val isNetflix = "netflix" in rawPackageText || "nflx" in rawPackageText || "fast.com" in rawPackageText
+        val isTelegram = "telegram" in rawPackageText || "tg" in rawPackageText || "t.me" in rawPackageText
+        val isTikTok = "tiktok" in rawPackageText || "byte" in rawPackageText
+        val isWhatsApp = "whatsapp" in rawPackageText || "wa" in rawPackageText || "social" in rawPackageText ||
+                "facebook" in rawPackageText || "meta" in rawPackageText || "instagram" in rawPackageText
+        val isYouTube = "youtube" in rawPackageText || "googlevideo" in rawPackageText || "video" in rawPackageText || "stream" in rawPackageText
+        val isGaming = "game" in rawPackageText || "pubg" in rawPackageText || "fire" in rawPackageText || "garena" in rawPackageText
         val isWorkLearn = "zoom" in rawPackageText || "teams" in rawPackageText ||
                 "work" in rawPackageText || "learn" in rawPackageText ||
-                "dialog" in rawPackageText || "mobitel" in rawPackageText ||
-                "office" in rawPackageText || "meet" in rawPackageText
+                "office" in rawPackageText || "meet" in rawPackageText ||
+                "ac.lk" in rawPackageText || "edu" in rawPackageText
+
+        var matchedSpecificService = false
+
+        if (isNetflix) {
+            onLog("Matched Netflix package: expanding Fast.com + Netflix CDN catalog (${NETFLIX_ECOSYSTEM.size} endpoints)")
+            seedDomains.addAll(NETFLIX_ECOSYSTEM)
+            matchedSpecificService = true
+        }
+
+        if (isTelegram) {
+            onLog("Matched Telegram package: expanding Telegram core & edge catalog (${TELEGRAM_ECOSYSTEM.size} endpoints)")
+            seedDomains.addAll(TELEGRAM_ECOSYSTEM)
+            matchedSpecificService = true
+        }
+
+        if (isTikTok) {
+            onLog("Matched TikTok package: expanding ByteDance CDN catalog (${TIKTOK_ECOSYSTEM.size} endpoints)")
+            seedDomains.addAll(TIKTOK_ECOSYSTEM)
+            matchedSpecificService = true
+        }
+
+        if (isWhatsApp) {
+            onLog("Matched WhatsApp/Social package: expanding WhatsApp/Meta catalog (${WHATSAPP_SOCIAL_ECOSYSTEM.size} endpoints)")
+            seedDomains.addAll(WHATSAPP_SOCIAL_ECOSYSTEM)
+            matchedSpecificService = true
+        }
+
+        if (isYouTube) {
+            onLog("Matched Video package: expanding YouTube/Google CDN catalog (${YOUTUBE_ECOSYSTEM.size} endpoints)")
+            seedDomains.addAll(YOUTUBE_ECOSYSTEM)
+            matchedSpecificService = true
+        }
+
+        if (isGaming) {
+            onLog("Matched Gaming package: expanding Game CDN catalog (${GAMING_ECOSYSTEM.size} endpoints)")
+            seedDomains.addAll(GAMING_ECOSYSTEM)
+            matchedSpecificService = true
+        }
 
         if (isWorkLearn) {
             onLog("Matched Work & Learn package: expanding Zoom + Microsoft Teams + Office 365 + Edu catalog (${WORK_AND_LEARN_ECOSYSTEM.size} endpoints)")
             seedDomains.addAll(WORK_AND_LEARN_ECOSYSTEM)
+            matchedSpecificService = true
         }
 
-        if ("tiktok" in rawPackageText) {
-            onLog("Matched TikTok package: expanding ByteDance CDN catalog (${TIKTOK_ECOSYSTEM.size} endpoints)")
-            seedDomains.addAll(TIKTOK_ECOSYSTEM)
-        }
-
-        if ("whatsapp" in rawPackageText || "chat" in rawPackageText || "social" in rawPackageText) {
-            onLog("Matched Social package: expanding WhatsApp/Meta catalog (${WHATSAPP_SOCIAL_ECOSYSTEM.size} endpoints)")
-            seedDomains.addAll(WHATSAPP_SOCIAL_ECOSYSTEM)
-        }
-
-        if ("youtube" in rawPackageText || "video" in rawPackageText || "stream" in rawPackageText) {
-            onLog("Matched Video package: expanding YouTube/Google CDN catalog (${YOUTUBE_ECOSYSTEM.size} endpoints)")
-            seedDomains.addAll(YOUTUBE_ECOSYSTEM)
-        }
-
-        if ("game" in rawPackageText || "fire" in rawPackageText || "pubg" in rawPackageText) {
-            onLog("Matched Gaming package: expanding Game CDN catalog (${GAMING_ECOSYSTEM.size} endpoints)")
-            seedDomains.addAll(GAMING_ECOSYSTEM)
+        // Secondary fallback: only if NO specific service was detected, use carrier hints or default work/learn suite
+        if (!matchedSpecificService) {
+            if ("dialog" in rawPackageText || "mobitel" in rawPackageText || "slt" in rawPackageText) {
+                onLog("Generic carrier profile detected: expanding Work & Learn and Social edge suites")
+                seedDomains.addAll(WORK_AND_LEARN_ECOSYSTEM.take(10))
+                seedDomains.addAll(WHATSAPP_SOCIAL_ECOSYSTEM.take(6))
+            } else {
+                seedDomains.addAll(WORK_AND_LEARN_ECOSYSTEM.take(8))
+            }
         }
 
         // Always include universal Anycast edge endpoints as high-speed fallbacks
@@ -202,13 +286,23 @@ class DynamicSniDiscoveryEngine @Inject constructor(
             seedDomains.add(config.effectiveSni)
         }
 
-        // 2. Dynamic TLS SAN Discovery from core root seeds (e.g. microsoft.com, zoom.us)
-        val rootsToHarvest = seedDomains.filter { it in listOf("microsoft.com", "zoom.us", "office.com", "tiktok.com") }
+        // 2. Dynamic TLS SAN Discovery from core root seeds matching the detected package
+        val rootsToHarvest = when {
+            isNetflix -> seedDomains.filter { it in listOf("fast.com", "netflix.com") }
+            isTelegram -> seedDomains.filter { it in listOf("t.me", "telegram.org") }
+            isTikTok -> seedDomains.filter { it in listOf("tiktok.com", "byteoversea.com") }
+            isWhatsApp -> seedDomains.filter { it in listOf("whatsapp.com", "facebook.com") }
+            isWorkLearn -> seedDomains.filter { it in listOf("microsoft.com", "zoom.us", "office.com") }
+            else -> seedDomains.filter { it in listOf("cloudflare.com", "fast.com") }
+        }.take(2)
+
         if (rootsToHarvest.isNotEmpty()) {
             onLog("Harvesting live TLS Certificate Subject Alternative Names (SANs) from core seeds...")
             for (root in rootsToHarvest) {
                 try {
-                    val harvestedSans = harvestSanFromHost(root)
+                    val harvestedSans = withTimeoutOrNull(2000L) {
+                        harvestSanFromHost(root)
+                    } ?: emptyList()
                     if (harvestedSans.isNotEmpty()) {
                         val validSans = harvestedSans
                             .filter { !it.contains("*") && it.length in 5..50 && !it.contains("/") }
@@ -224,33 +318,49 @@ class DynamicSniDiscoveryEngine @Inject constructor(
             }
         }
 
-        // 3. Fast Parallel Physical DNS Resolution Filter
+        // 3. Fast Parallel Physical DNS Resolution Filter with timeout & supervisorScope
         onLog("Verifying pure network DNS reachability for ${seedDomains.size} candidate endpoints...")
         val physicalNet = routeScannerEngine.getUnderlyingPhysicalNetwork()
-        val verifiedDomains = seedDomains.map { domain ->
-            async(dispatchers.io) {
-                val hasIpv4 = try {
-                    val addresses = if (physicalNet != null) {
-                        physicalNet.getAllByName(domain)
-                    } else {
-                        InetAddress.getAllByName(domain)
+        val verifiedDomains = supervisorScope {
+            seedDomains.map { domain ->
+                async(dispatchers.io) {
+                    withTimeoutOrNull(1500L) {
+                        try {
+                            val addresses = try {
+                                physicalNet?.getAllByName(domain)
+                            } catch (_: Exception) {
+                                null
+                            } ?: InetAddress.getAllByName(domain)
+                            val hasIpv4 = addresses.any { it is Inet4Address }
+                            if (hasIpv4) domain else null
+                        } catch (_: Exception) {
+                            null
+                        }
                     }
-                    addresses.any { it is Inet4Address }
-                } catch (_: Exception) {
-                    false
                 }
-                if (hasIpv4) domain else null
-            }
-        }.awaitAll().filterNotNull()
+            }.awaitAll().filterNotNull()
+        }
 
         onLog("DNS verification completed: ${verifiedDomains.size} responsive endpoints active on pure network.")
+
+        // CRITICAL ZERO-DROP FALLBACK:
+        // On restricted mobile data SIMs (where carrier DNS blocks non-whitelisted queries or returns empty),
+        // NEVER drop candidates or fail! Retain the curated package seeds directly!
+        val activeDomains = if (verifiedDomains.isNotEmpty()) {
+            verifiedDomains
+        } else {
+            onLog("Zero-rated carrier DNS shield detected: retaining curated package endpoints directly.")
+            seedDomains.toList()
+        }
 
         // 4. Construct Dual Strategy Candidates (ADDR_SNI and STANDARD_SNI)
         val vpsDomain = RouteScannerEngine.DEFAULT_VPS_DOMAIN
         val vpsIp = RouteScannerEngine.DEFAULT_VPS_IP
 
-        val candidates = verifiedDomains.flatMap { domain ->
+        val candidates = activeDomains.flatMap { domain ->
             val cat = when {
+                domain.contains("netflix") || domain.contains("fast.com") || domain.contains("nflx") -> SniCategory.NETFLIX
+                domain.contains("telegram") || domain.contains("t.me") || domain.contains("telesco.pe") -> SniCategory.TELEGRAM
                 domain.contains("zoom") || domain.contains("teams") || domain.contains("office") || domain.contains("microsoft") || domain.contains("aka.ms") || domain.contains("ac.lk") -> SniCategory.ZOOM_TEAMS
                 domain.contains("tiktok") || domain.contains("byte") -> SniCategory.TIKTOK
                 domain.contains("whatsapp") || domain.contains("face") || domain.contains("insta") -> SniCategory.WHATSAPP_SOCIAL
@@ -260,7 +370,7 @@ class DynamicSniDiscoveryEngine @Inject constructor(
 
             listOf(
                 // Strategy 1: Addr SNI Fronting
-                // Destination IP/Host is the zero-rated bug host (e.g. aka.ms / teams.microsoft.com), TLS SNI is VPS domain
+                // Destination IP/Host is the zero-rated bug host (e.g. aka.ms / fast.com), TLS SNI is VPS domain
                 SniRouteCandidate(
                     domain = domain,
                     strategy = RouteStrategy.ADDR_SNI,
@@ -280,6 +390,36 @@ class DynamicSniDiscoveryEngine @Inject constructor(
                     targetHost = vpsIp,
                     targetPort = 443,
                     sni = domain,
+                    wsHost = vpsDomain,
+                    wsPath = "/v2rayops"
+                )
+            )
+        }.toMutableList()
+
+        // Emergency fallback: guarantee candidates is NEVER empty
+        if (candidates.isEmpty()) {
+            val fallbackDomain = config?.effectiveSni?.ifBlank { "zoom.us" } ?: "zoom.us"
+            val fallbackHost = config?.host?.ifBlank { vpsIp } ?: vpsIp
+            candidates.add(
+                SniRouteCandidate(
+                    domain = fallbackDomain,
+                    strategy = RouteStrategy.ADDR_SNI,
+                    category = SniCategory.CUSTOM,
+                    targetHost = fallbackHost,
+                    targetPort = 443,
+                    sni = vpsDomain,
+                    wsHost = vpsDomain,
+                    wsPath = "/v2rayops"
+                )
+            )
+            candidates.add(
+                SniRouteCandidate(
+                    domain = fallbackDomain,
+                    strategy = RouteStrategy.STANDARD_SNI,
+                    category = SniCategory.CUSTOM,
+                    targetHost = vpsIp,
+                    targetPort = 443,
+                    sni = fallbackDomain,
                     wsHost = vpsDomain,
                     wsPath = "/v2rayops"
                 )

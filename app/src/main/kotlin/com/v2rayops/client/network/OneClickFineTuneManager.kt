@@ -11,6 +11,7 @@ import com.v2rayops.client.vpn.VpnManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -106,7 +108,7 @@ class OneClickFineTuneManager @Inject constructor(
         if (_state.value.isRunning) return
         _state.value = _state.value.copy(targetMode = mode)
 
-        activeJob = CoroutineScope(dispatchers.io).launch {
+        activeJob = CoroutineScope(dispatchers.io + SupervisorJob()).launch {
             runPipeline(targetConfig, mode)
         }
     }
@@ -194,13 +196,18 @@ class OneClickFineTuneManager @Inject constructor(
             val initialDl = (baseConfig?.measuredSpeedMbps?.takeIf { it > 0 }?.toDouble()) ?: 11.5
             val initialUl = (baseConfig?.measuredUploadMbps?.takeIf { it > 0.0 }) ?: 0.72
 
-            val rawText = (baseConfig?.displayName.orEmpty() + " " + baseConfig?.remark.orEmpty() + " " + baseConfig?.host.orEmpty()).lowercase()
+            val rawText = (baseConfig?.displayName.orEmpty() + " " + baseConfig?.remark.orEmpty() + " " + baseConfig?.host.orEmpty() + " " + baseConfig?.effectiveSni.orEmpty()).lowercase()
             val packageName = when {
-                "zoom" in rawText || "dialog" in rawText -> "Dialog Zoom & Enterprise Fronting"
-                "tiktok" in rawText || "mobitel" in rawText -> "Mobitel TikTok / ByteDance"
-                "youtube" in rawText || "google" in rawText -> "YouTube / Google Video CDN"
-                "whatsapp" in rawText || "chat" in rawText || "slt" in rawText -> "SLT WhatsApp & Social"
-                "game" in rawText || "pubg" in rawText || "free fire" in rawText -> "Low-Latency Gaming Relay"
+                "netflix" in rawText || "nflx" in rawText || "fast.com" in rawText -> "Netflix Video Stream Relay"
+                "telegram" in rawText || "tg" in rawText || "t.me" in rawText -> "Telegram Messenger CDN"
+                "tiktok" in rawText || "byte" in rawText -> "TikTok / ByteDance Fronting"
+                "whatsapp" in rawText || "wa" in rawText || "social" in rawText || "face" in rawText || "insta" in rawText -> "WhatsApp & Social Network"
+                "youtube" in rawText || "google" in rawText || "video" in rawText || "stream" in rawText -> "YouTube / Google Video CDN"
+                "zoom" in rawText || "teams" in rawText || "learn" in rawText || "work" in rawText || "office" in rawText || "meet" in rawText -> "Zoom & Work/Learn Fronting"
+                "game" in rawText || "pubg" in rawText || "fire" in rawText || "garena" in rawText -> "Low-Latency Gaming Relay"
+                "dialog" in rawText -> "Dialog Dynamic Edge Fronting"
+                "mobitel" in rawText -> "Mobitel Dynamic Edge Fronting"
+                "slt" in rawText -> "SLT Dynamic Edge Fronting"
                 else -> "Carrier Unlimited Universal Fronting"
             }
             _state.value = _state.value.copy(
@@ -216,6 +223,7 @@ class OneClickFineTuneManager @Inject constructor(
             // ==========================================
             updatePhase(FineTunePhase.PROBING_FRONTS, 0.20f, "Phase 2/5: Discovering Ecosystem SNIs on Pure Network...")
             val candidates = dynamicSniDiscoveryEngine.discoverCandidates(baseConfig, onLog = { addLog(it) })
+            val totalCandidates = candidates.size.coerceAtLeast(1)
             _state.value = _state.value.copy(totalToProbe = candidates.size)
             addLog("Discovered ${candidates.size} specialized carrier fronting & SNI candidates.")
 
@@ -223,43 +231,60 @@ class OneClickFineTuneManager @Inject constructor(
             val probedResults = Collections.synchronizedList(mutableListOf<SniRouteCandidate>())
             val completedCount = AtomicInteger(0)
 
-            val probeJobs = candidates.map { cand ->
-                async(dispatchers.io) {
-                    semaphore.withPermit {
-                        if (!isActive) return@withPermit
-                        val result = routeScannerEngine.scanCandidate(cand, ScanProfile.QUICK_AUDIT)
-                        probedResults.add(result)
-                        val count = completedCount.incrementAndGet()
-                        val progressStep = 0.20f + ((count.toFloat() / candidates.size.toFloat()) * 0.35f)
-                        _state.value = _state.value.copy(probedCount = count, progress = progressStep)
+            supervisorScope {
+                val probeJobs = candidates.map { cand ->
+                    async(dispatchers.io) {
+                        semaphore.withPermit {
+                            if (!isActive) return@withPermit
+                            try {
+                                val result = routeScannerEngine.scanCandidate(cand, ScanProfile.QUICK_AUDIT)
+                                probedResults.add(result)
+                                val count = completedCount.incrementAndGet()
+                                val progressStep = 0.20f + ((count.toFloat() / totalCandidates.toFloat()) * 0.35f)
+                                _state.value = _state.value.copy(probedCount = count, progress = progressStep)
 
-                        if (result.status == SniStatus.WS_READY || result.status == SniStatus.TLS_OK) {
-                            val statusLabel = if (result.status == SniStatus.WS_READY) "WS READY (${result.avgLatencyMs}ms)" else "TLS OK (${result.avgLatencyMs}ms)"
-                            addLog("> [${cand.strategy.shortTag}] ${cand.domain} -> $statusLabel")
+                                if (result.status == SniStatus.WS_READY || result.status == SniStatus.TLS_OK) {
+                                    val statusLabel = if (result.status == SniStatus.WS_READY) "WS READY (${result.avgLatencyMs}ms)" else "TLS OK (${result.avgLatencyMs}ms)"
+                                    addLog("> [${cand.strategy.shortTag}] ${cand.domain} -> $statusLabel")
+                                }
+                            } catch (e: Exception) {
+                                AppLogger.d(TAG, "Candidate probe skipped for ${cand.domain}: ${e.message}")
+                            }
                         }
                     }
                 }
+                probeJobs.awaitAll()
             }
-            probeJobs.awaitAll()
 
             // Triple-Mode Winner Selection: STRICTLY 3 DIFFERENT DOMAINS
             val passing = probedResults.filter { it.status == SniStatus.WS_READY || it.status == SniStatus.TLS_OK }
-            val pool = if (passing.isNotEmpty()) passing else probedResults
+            val pool = if (passing.isNotEmpty()) passing else (if (probedResults.isNotEmpty()) probedResults else candidates)
+
+            val fallbackCandidate = candidates.firstOrNull() ?: SniRouteCandidate(
+                domain = baseConfig?.effectiveSni?.ifBlank { "zoom.us" } ?: "zoom.us",
+                strategy = RouteStrategy.ADDR_SNI,
+                category = SniCategory.CUSTOM,
+                targetHost = baseConfig?.host ?: RouteScannerEngine.DEFAULT_VPS_IP,
+                targetPort = 443,
+                sni = baseConfig?.effectiveSni ?: RouteScannerEngine.DEFAULT_VPS_DOMAIN,
+                wsHost = baseConfig?.effectiveSni ?: RouteScannerEngine.DEFAULT_VPS_DOMAIN,
+                wsPath = "/v2rayops"
+            )
 
             // 1. Speed Winner: Lowest latency passing route
-            val speedWinner = routeScannerEngine.findBestSpeedCandidate(pool) ?: candidates.first()
+            val speedWinner = routeScannerEngine.findBestSpeedCandidate(pool) ?: candidates.firstOrNull() ?: fallbackCandidate
 
             // 2. Stability Winner: Highest stability & 0% loss, EXCLUDING Speed Winner's domain
             val remainingForStability = pool.filter { it.domain != speedWinner.domain }
             val stabilityWinner = routeScannerEngine.findBestStabilityCandidate(
                 if (remainingForStability.isNotEmpty()) remainingForStability else pool
-            ) ?: candidates.getOrNull(1) ?: speedWinner
+            ) ?: candidates.firstOrNull { it.domain != speedWinner.domain } ?: candidates.getOrNull(1) ?: speedWinner
 
             // 3. Balanced Winner: Best composite score, EXCLUDING both Speed and Stability domains
             val remainingForBalanced = pool.filter { it.domain != speedWinner.domain && it.domain != stabilityWinner.domain }
             val balancedWinner = routeScannerEngine.findBestBalancedCandidate(
                 if (remainingForBalanced.isNotEmpty()) remainingForBalanced else pool
-            ) ?: candidates.getOrNull(2) ?: speedWinner
+            ) ?: candidates.firstOrNull { it.domain != speedWinner.domain && it.domain != stabilityWinner.domain } ?: candidates.getOrNull(2) ?: speedWinner
 
             addLog("Speed Mode: [${speedWinner.strategy.shortTag}] ${speedWinner.domain} (${speedWinner.avgLatencyMs}ms)")
             addLog("Stability Mode: [${stabilityWinner.strategy.shortTag}] ${stabilityWinner.domain} (${stabilityWinner.stabilityScore}% stab)")

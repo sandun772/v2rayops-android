@@ -17,6 +17,26 @@ class RouteScannerEngineTest {
 
         assertEquals(addrSniList.size, standardSniList.size)
 
+        // Verify Zoom patterns exist
+        val hasZoom = addrSniList.any { it.domain == "support.zoom.us" && it.category == SniCategory.ZOOM_TEAMS }
+        assertTrue("Zoom must be present in default candidates", hasZoom)
+
+        // Verify Netflix patterns exist
+        val hasNetflix = addrSniList.any { (it.domain == "fast.com" || it.domain == "netflix.com") && it.category == SniCategory.NETFLIX }
+        assertTrue("Netflix/Fast.com must be present in default candidates", hasNetflix)
+
+        // Verify Telegram patterns exist
+        val hasTelegram = addrSniList.any { (it.domain == "t.me" || it.domain == "telegram.org") && it.category == SniCategory.TELEGRAM }
+        assertTrue("Telegram must be present in default candidates", hasTelegram)
+
+        // Verify TikTok patterns exist
+        val hasTiktok = addrSniList.any { it.domain == "tiktok.com" && it.category == SniCategory.TIKTOK }
+        assertTrue("TikTok must be present in default candidates", hasTiktok)
+
+        // Verify WhatsApp patterns exist
+        val hasWhatsapp = addrSniList.any { it.domain == "web.whatsapp.com" && it.category == SniCategory.WHATSAPP_SOCIAL }
+        assertTrue("WhatsApp must be present in default candidates", hasWhatsapp)
+
         // Verify ADDR_SNI fronting candidate targets the bug host domain directly with VPS cluster SNI
         val zoomAddrFronting = addrSniList.first { it.domain == "support.zoom.us" }
         assertEquals("support.zoom.us", zoomAddrFronting.targetHost)
@@ -29,6 +49,24 @@ class RouteScannerEngineTest {
         assertEquals(RouteScannerEngine.DEFAULT_VPS_IP, zoomStandard.targetHost)
         assertEquals("support.zoom.us", zoomStandard.sni)
         assertEquals(RouteScannerEngine.DEFAULT_VPS_DOMAIN, zoomStandard.wsHost)
+    }
+
+    @Test
+    fun generateCandidatesFromWords_expandsNetflixAndTelegramKeywords() {
+        val keywords = listOf("netflix", "telegram")
+        val generated = RouteScannerEngine.generateCandidatesFromWords(keywords)
+
+        assertTrue(generated.isNotEmpty())
+
+        val netflixCandidates = generated.filter { it.category == SniCategory.NETFLIX }
+        assertTrue("Must generate Netflix candidates", netflixCandidates.isNotEmpty())
+        assertTrue(netflixCandidates.any { it.domain == "fast.com" })
+        assertTrue(netflixCandidates.any { it.domain == "netflix.com" })
+
+        val telegramCandidates = generated.filter { it.category == SniCategory.TELEGRAM }
+        assertTrue("Must generate Telegram candidates", telegramCandidates.isNotEmpty())
+        assertTrue(telegramCandidates.any { it.domain == "t.me" })
+        assertTrue(telegramCandidates.any { it.domain == "telegram.org" })
     }
 
     @Test

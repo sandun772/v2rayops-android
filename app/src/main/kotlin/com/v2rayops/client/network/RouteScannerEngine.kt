@@ -47,8 +47,10 @@ enum class RouteStrategy(val displayName: String, val shortTag: String) {
 
 enum class SniCategory(val displayName: String) {
     ZOOM_TEAMS("Zoom & Teams"),
+    NETFLIX("Netflix Video"),
     TIKTOK("TikTok"),
     WHATSAPP_SOCIAL("WhatsApp & Social"),
+    TELEGRAM("Telegram Messenger"),
     CLOUDFLARE_EDGE("Cloudflare Edge"),
     CUSTOM("Custom")
 }
@@ -199,16 +201,36 @@ class RouteScannerEngine @Inject constructor(
             "microsoft.com" to SniCategory.ZOOM_TEAMS,
             "teams.microsoft.com" to SniCategory.ZOOM_TEAMS,
             "office.com" to SniCategory.ZOOM_TEAMS,
+            "aka.ms" to SniCategory.ZOOM_TEAMS,
+
+            // Netflix Packages
+            "fast.com" to SniCategory.NETFLIX,
+            "netflix.com" to SniCategory.NETFLIX,
+            "api-global.netflix.com" to SniCategory.NETFLIX,
+            "assets.nflxext.com" to SniCategory.NETFLIX,
+            "nflxvideo.net" to SniCategory.NETFLIX,
 
             // TikTok Packages
             "tiktok.com" to SniCategory.TIKTOK,
             "p16-va.tiktokcdn.com" to SniCategory.TIKTOK,
             "v16m.tiktokcdn.com" to SniCategory.TIKTOK,
             "api.tiktokv.com" to SniCategory.TIKTOK,
+            "v16-webapp-prime.tiktok.com" to SniCategory.TIKTOK,
+            "byteoversea.com" to SniCategory.TIKTOK,
 
             // WhatsApp & Social
             "web.whatsapp.com" to SniCategory.WHATSAPP_SOCIAL,
             "media.whatsapp.net" to SniCategory.WHATSAPP_SOCIAL,
+            "g.whatsapp.net" to SniCategory.WHATSAPP_SOCIAL,
+            "v.whatsapp.net" to SniCategory.WHATSAPP_SOCIAL,
+            "facebook.com" to SniCategory.WHATSAPP_SOCIAL,
+            "instagram.com" to SniCategory.WHATSAPP_SOCIAL,
+
+            // Telegram Messenger
+            "t.me" to SniCategory.TELEGRAM,
+            "telegram.org" to SniCategory.TELEGRAM,
+            "web.telegram.org" to SniCategory.TELEGRAM,
+            "cdn1.telesco.pe" to SniCategory.TELEGRAM,
 
             // YouTube / Google
             "googlevideo.com" to SniCategory.CUSTOM,
@@ -285,14 +307,21 @@ class RouteScannerEngine @Inject constructor(
                     generatedDomains.add(w)
                 } else {
                     domainTemplates.forEach { t -> generatedDomains.add(t(w)) }
+                    if (w == "netflix" || w == "nflx") {
+                        generatedDomains.addAll(listOf("fast.com", "netflix.com", "api-global.netflix.com", "assets.nflxext.com", "nflxvideo.net"))
+                    } else if (w == "telegram" || w == "tg") {
+                        generatedDomains.addAll(listOf("t.me", "telegram.org", "web.telegram.org", "cdn1.telesco.pe"))
+                    }
                 }
             }
 
             return generatedDomains.flatMap { d ->
                 val cat = when {
+                    d.contains("netflix") || d.contains("fast.com") || d.contains("nflx") -> SniCategory.NETFLIX
+                    d.contains("telegram") || d.contains("t.me") || d.contains("telesco.pe") -> SniCategory.TELEGRAM
                     d.contains("zoom") || d.contains("teams") || d.contains("learn") || d.contains("office") -> SniCategory.ZOOM_TEAMS
-                    d.contains("tiktok") -> SniCategory.TIKTOK
-                    d.contains("whatsapp") -> SniCategory.WHATSAPP_SOCIAL
+                    d.contains("tiktok") || d.contains("byte") -> SniCategory.TIKTOK
+                    d.contains("whatsapp") || d.contains("face") || d.contains("insta") -> SniCategory.WHATSAPP_SOCIAL
                     d.contains("cloudflare") || d.contains("one") -> SniCategory.CLOUDFLARE_EDGE
                     else -> SniCategory.CUSTOM
                 }
