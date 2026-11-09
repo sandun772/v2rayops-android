@@ -4,10 +4,17 @@ import android.app.Activity
 import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,9 +27,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,7 +40,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.v2rayops.client.domain.model.ConnectionState
@@ -40,12 +53,15 @@ import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
 import com.v2rayops.client.ui.dashboard.components.ClientNavTab
 import com.v2rayops.client.ui.dashboard.components.ConcentricRadarDial
 import com.v2rayops.client.ui.dashboard.components.DigitalTimerText
+import com.v2rayops.client.ui.dashboard.components.HiddenSpeedStabilityWidget
 import com.v2rayops.client.ui.dashboard.components.ProxyModeSelector
+import com.v2rayops.client.ui.dashboard.components.PullDownChargingArc
 import com.v2rayops.client.ui.dashboard.components.SpeedDividedSection
 import com.v2rayops.client.ui.dashboard.components.SpeedOptimizationMode
 import com.v2rayops.client.ui.dashboard.components.StatusPill
 import com.v2rayops.client.ui.dashboard.components.UsageCockpitDialog
 import com.v2rayops.client.ui.dashboard.components.V2RayOpsTopBar
+import kotlinx.coroutines.delay
 
 @Composable
 fun DashboardScreen(
@@ -62,6 +78,8 @@ fun DashboardScreen(
     val selectedConfig by viewModel.selectedConfig.collectAsState()
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
     val livePingMs by viewModel.livePingMs.collectAsState()
+    val quickAuditState by viewModel.quickAuditState.collectAsState()
+    val haptic = LocalHapticFeedback.current
 
     val currentMode = remember(selectedConfig) {
         when (selectedConfig?.tuningMode?.uppercase()) {
@@ -72,7 +90,42 @@ fun DashboardScreen(
     }
     var showUsageCockpit by remember { mutableStateOf(false) }
 
+    var isCharging by remember { mutableStateOf(false) }
+    var chargeProgress by remember { mutableFloatStateOf(0f) }
+    var isHiddenWidgetVisible by remember { mutableStateOf(false) }
+
     val scrollState = rememberScrollState()
+
+    // Auto-hide the speed & stability HUD whenever user scrolls down
+    LaunchedEffect(scrollState.value) {
+        if (scrollState.value > 15 && isHiddenWidgetVisible) {
+            isHiddenWidgetVisible = false
+        }
+    }
+
+    // 3-second hold countdown effect
+    LaunchedEffect(isCharging) {
+        if (isCharging) {
+            val durationMs = 3000L
+            val startTime = System.currentTimeMillis()
+            while (isCharging) {
+                val elapsed = System.currentTimeMillis() - startTime
+                val progress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
+                chargeProgress = progress
+                if (progress >= 1f) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    isHiddenWidgetVisible = true
+                    isCharging = false
+                    chargeProgress = 0f
+                    viewModel.startQuickAudit()
+                    break
+                }
+                delay(16)
+            }
+        } else {
+            chargeProgress = 0f
+        }
+    }
 
     // Show top gradient ONLY when scrolled, smoothly ramping up without instant jump on 1px
     val topGradientAlpha by remember {
@@ -105,7 +158,6 @@ fun DashboardScreen(
         }
     }
 
-    val isConnected = connectionState.isConnected
     val realPingMs = livePingMs ?: diagnosticResult?.pingMs?.takeIf { it > 0 }
 
     Scaffold(
@@ -136,6 +188,31 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .pointerInput(scrollState.value, isHiddenWidgetVisible) {
+                    if (scrollState.value > 0 || isHiddenWidgetVisible) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        var isArmed = false
+                        val startY = down.position.y
+
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pointer = event.changes.find { it.id == down.id }
+                            if (pointer == null || !pointer.pressed) {
+                                isCharging = false
+                                break
+                            }
+                            val deltaY = pointer.position.y - startY
+                            if (deltaY > 50f && !isArmed && scrollState.value == 0) {
+                                isArmed = true
+                                isCharging = true
+                            } else if (deltaY < 20f && isArmed) {
+                                isArmed = false
+                                isCharging = false
+                            }
+                        }
+                    }
+                }
         ) {
             Column(
                 modifier = Modifier
@@ -146,6 +223,30 @@ fun DashboardScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Spacer(modifier = Modifier.height(2.dp))
+
+                // Pull-Down 3s Charging Arc Indicator
+                PullDownChargingArc(
+                    chargeProgress = chargeProgress,
+                    isCharging = isCharging
+                )
+
+                // Hidden Cyber Speed & Stability Cockpit Widget
+                AnimatedVisibility(
+                    visible = isHiddenWidgetVisible,
+                    enter = expandVertically(tween(350, easing = FastOutSlowInEasing)) + fadeIn(tween(250)),
+                    exit = shrinkVertically(tween(300, easing = FastOutSlowInEasing)) + fadeOut(tween(200))
+                ) {
+                    HiddenSpeedStabilityWidget(
+                        state = quickAuditState,
+                        onDismiss = {
+                            isHiddenWidgetVisible = false
+                            viewModel.dismissQuickAudit()
+                        },
+                        onRetest = {
+                            viewModel.startQuickAudit()
+                        }
+                    )
+                }
 
                 // 1. Status Capsule Pill (• DISCONNECTED / • HANDSHAKING / • CONNECTED)
                 StatusPill(connectionState = connectionState)
