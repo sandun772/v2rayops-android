@@ -65,11 +65,24 @@ class AdaptiveQoSEngine @Inject constructor(
                 return@launch
             }
 
-            // Thresholds: Heavy download = > 1.5 MB/s, Bufferbloat = ping > 450ms while downloading
-            val isHeavyDownload = downSpeedBps > 1_500_000L
-            val isCongested = (isHeavyDownload && currentPingMs > 450L) || (currentPingMs > 750L)
+            // Gaming Mode & QoS Thresholds:
+            // When Gaming Mode is active, bufferbloat tolerance is clamped to 80ms to keep game tick latency rock-solid.
+            val isGamingMode = settings.gamingModeEnabled
+            val isHeavyDownload = if (isGamingMode) downSpeedBps > 300_000L else downSpeedBps > 1_500_000L
+            val isCongested = if (isGamingMode) {
+                (isHeavyDownload && currentPingMs > 80L) || (currentPingMs > 110L)
+            } else {
+                (isHeavyDownload && currentPingMs > 450L) || (currentPingMs > 750L)
+            }
 
             val (level, message) = when {
+                isGamingMode && isCongested -> {
+                    AppLogger.d("AdaptiveQoS", "Gaming Mode backpressure active: ping=${currentPingMs}ms, pacing background traffic")
+                    QoSCongestionLevel.BUFFERBLOAT_MITIGATION to "Gaming Mode active: Background paced to hold ping under 80ms (Live: ${currentPingMs}ms)"
+                }
+                isGamingMode -> {
+                    QoSCongestionLevel.OPTIMAL to "Gaming Mode active: 16KB buffer clamp engaged (Ping: ${if (currentPingMs > 0) "${currentPingMs}ms" else "Stable"})"
+                }
                 isCongested -> {
                     AppLogger.d("AdaptiveQoS", "Bufferbloat mitigation active: down=${downSpeedBps / 1024} KB/s, ping=${currentPingMs}ms")
                     QoSCongestionLevel.BUFFERBLOAT_MITIGATION to "Active download paced to protect foreground app stability (Ping: ${currentPingMs}ms)"

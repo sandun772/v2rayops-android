@@ -62,4 +62,8 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun setDpiDelayFixEnabled(enabled: Boolean) {
         preferencesDataStore.setDpiDelayFixEnabled(enabled)
     }
+
+    override suspend fun setGamingModeEnabled(enabled: Boolean) {
+        preferencesDataStore.setGamingModeEnabled(enabled)
+    }
 }

@@ -158,4 +158,50 @@ class XrayConfigGeneratorTest {
         }
         assertTrue("QUIC UDP 443 must be blocked in routing rules", quicBlocked)
     }
+
+    @Test
+    fun generateJson_withGamingModeEnabled_clampsBufferTo16KbAndMtu1360() {
+        val config = VpnConfig(
+            id = 10,
+            protocol = "vless",
+            configUri = "vless://2ffb3ad4-50ab-1a0d-13ab-9f405ec5a45c@v2rayops.vpnxhub.com:443?security=reality&sni=v2rayops.vpnxhub.com&pbk=fakePbk&sid=1234&type=tcp#SG1",
+            serverId = 10,
+            status = "active"
+        )
+
+        val settings = UserSettings(
+            gamingModeEnabled = true,
+            tcpBufferSizeKb = 1024,
+            dpiDelayFixEnabled = true
+        )
+
+        val jsonString = generator.generateJson(config, settings)
+        val json = JSONObject(jsonString)
+
+        // 1. Level 8 buffer size must be clamped strictly to 16KB for aggressive TCP backpressure
+        val policyLevels = json.getJSONObject("policy").getJSONObject("levels")
+        assertEquals(16, policyLevels.getJSONObject("8").getInt("bufferSize"))
+        assertEquals(16, policyLevels.getJSONObject("0").getInt("bufferSize"))
+
+        // 2. TUN inbound MTU must be 1360 to eliminate cellular carrier packet fragmentation
+        val tunInbound = json.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals("tun", tunInbound.getString("protocol"))
+        assertEquals(1360, tunInbound.getJSONObject("settings").getInt("mtu"))
+
+        // 3. DPI Delay Fix must be disabled in Gaming Mode to prevent TLS fragmentation pause
+        val outbounds = json.getJSONArray("outbounds")
+        var hasFragmentOutbound = false
+        for (i in 0 until outbounds.length()) {
+            if (outbounds.getJSONObject(i).optString("tag") == "fragment") {
+                hasFragmentOutbound = true
+            }
+        }
+        assertFalse("Fragment outbound must be absent in Gaming Mode", hasFragmentOutbound)
+
+        // 4. Socket options must have keepalive 5s to prevent cellular tower radio sleep
+        val proxyOutbound = outbounds.getJSONObject(0)
+        val sockopt = proxyOutbound.getJSONObject("streamSettings").getJSONObject("sockopt")
+        assertEquals(5, sockopt.getInt("tcpKeepAliveInterval"))
+        assertTrue(sockopt.getBoolean("tcpNoDelay"))
+    }
 }

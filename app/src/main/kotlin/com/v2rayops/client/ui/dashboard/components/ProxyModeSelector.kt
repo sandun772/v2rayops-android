@@ -40,21 +40,39 @@ typealias AppProxyMode = SpeedOptimizationMode
 fun ProxyModeSelector(
     selectedMode: SpeedOptimizationMode,
     onModeSelected: (SpeedOptimizationMode) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isGamingModeLocked: Boolean = false
 ) {
     Column(
         modifier = modifier.fillMaxWidth()
     ) {
-        // Label: SPEED & OPTIMIZATION MODE
-        Text(
-            text = "SPEED & OPTIMIZATION MODE",
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp,
-            color = Color(0xFF64748B),
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        // Label Header: SPEED & OPTIMIZATION MODE + Gaming Mode Lock Badge
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "SPEED & OPTIMIZATION MODE",
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                color = Color(0xFF64748B)
+            )
+
+            if (isGamingModeLocked) {
+                Text(
+                    text = "AUTO-LOCKED BY GAMING MODE",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF10B981)
+                )
+            }
+        }
 
         // Segmented Control Capsule (Balanced | Speed | Stability)
         Row(

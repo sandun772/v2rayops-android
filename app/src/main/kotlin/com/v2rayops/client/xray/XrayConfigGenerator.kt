@@ -29,10 +29,19 @@ class XrayConfigGenerator @Inject constructor(
 
         // Per-config Optimization Presets with UserSettings fallback
         val effectiveDns = config.customDns?.takeIf { it.isNotBlank() } ?: settings.customDns.ifBlank { "1.1.1.1" }
-        val effectiveMtu = config.customMtu ?: if (settings.cellularMtuOptimized) 1380 else 1500
-        val effectiveDpiFix = config.dpiDelayFix ?: settings.dpiDelayFixEnabled
+        val effectiveMtu = if (settings.gamingModeEnabled) {
+            1360
+        } else {
+            config.customMtu ?: if (settings.cellularMtuOptimized) 1380 else 1500
+        }
+        val effectiveDpiFix = if (settings.gamingModeEnabled) {
+            false
+        } else {
+            config.dpiDelayFix ?: settings.dpiDelayFixEnabled
+        }
         val effectiveSmartQoS = config.smartQoS ?: settings.smartQoSEnabled
-        val effectiveTcpBufferKb = config.customTcpBufferKb ?: settings.tcpBufferSizeKb
+        val effectiveTcpBufferKb = if (settings.gamingModeEnabled) 16 else (config.customTcpBufferKb ?: settings.tcpBufferSizeKb)
+        val keepAliveIntervalSec = if (settings.gamingModeEnabled) 5 else 15
 
         val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
         val isVpsHost = { h: String ->
@@ -271,7 +280,7 @@ class XrayConfigGenerator @Inject constructor(
                     // High-performance socket options
                     val sockopt = JSONObject().apply {
                         put("tcpNoDelay", true)
-                        put("tcpKeepAliveInterval", 15)
+                        put("tcpKeepAliveInterval", keepAliveIntervalSec)
                         if (effectiveDpiFix) {
                             put("dialerProxy", "fragment")
                         }
@@ -299,7 +308,7 @@ class XrayConfigGenerator @Inject constructor(
                 put("streamSettings", JSONObject().apply {
                     put("sockopt", JSONObject().apply {
                         put("tcpNoDelay", true)
-                        put("tcpKeepAliveInterval", 15)
+                        put("tcpKeepAliveInterval", keepAliveIntervalSec)
                     })
                 })
             })
@@ -428,8 +437,16 @@ class XrayConfigGenerator @Inject constructor(
                     put("connIdle", 300)
                     put("uplinkOnly", 1)
                     put("downlinkOnly", 1)
-                    // Smart QoS: Restrict buffer size to apply TCP sliding window backpressure and mitigate bufferbloat
-                    val bufKb = if (effectiveSmartQoS) effectiveTcpBufferKb.coerceIn(64, 4096) else 64
+                    // Gaming Mode & Smart QoS: In Gaming Mode, clamp buffer size strictly to 16KB.
+                    // This generates aggressive TCP sliding window backpressure, severely throttling
+                    // background applications so game UDP packets face zero bufferbloat queue delay.
+                    val bufKb = if (settings.gamingModeEnabled) {
+                        16
+                    } else if (effectiveSmartQoS) {
+                        effectiveTcpBufferKb.coerceIn(64, 4096)
+                    } else {
+                        64
+                    }
                     put("bufferSize", bufKb)
                 }
                 put("8", level8)

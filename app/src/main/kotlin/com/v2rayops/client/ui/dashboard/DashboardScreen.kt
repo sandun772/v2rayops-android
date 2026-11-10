@@ -57,6 +57,7 @@ import com.v2rayops.client.ui.dashboard.components.ClientBottomNavBar
 import com.v2rayops.client.ui.dashboard.components.ClientNavTab
 import com.v2rayops.client.ui.dashboard.components.ConcentricRadarDial
 import com.v2rayops.client.ui.dashboard.components.DigitalTimerText
+import com.v2rayops.client.ui.dashboard.components.GamingModeCard
 import com.v2rayops.client.ui.dashboard.components.HiddenSpeedStabilityWidget
 import com.v2rayops.client.ui.dashboard.components.ProxyModeSelector
 import com.v2rayops.client.ui.dashboard.components.PullDownChargingPill
@@ -84,6 +85,7 @@ fun DashboardScreen(
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
     val livePingMs by viewModel.livePingMs.collectAsState()
     val quickAuditState by viewModel.quickAuditState.collectAsState()
+    val isGamingModeEnabled by viewModel.isGamingModeEnabled.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val currentMode = remember(selectedConfig) {
@@ -382,12 +384,19 @@ fun DashboardScreen(
                     onClick = onNavigateToServers
                 )
 
-                // 6. SPEED & OPTIMIZATION MODE Segmented Control (Balanced / Speed / Stability)
+                // 6. GAMING MODE Card (Ultra-low ping • 16KB Buffer Clamp • Background Throttling)
+                GamingModeCard(
+                    isEnabled = isGamingModeEnabled,
+                    onToggle = { viewModel.toggleGamingMode() }
+                )
+
+                // 7. SPEED & OPTIMIZATION MODE Segmented Control (Balanced / Speed / Stability)
                 ProxyModeSelector(
                     selectedMode = currentMode,
                     onModeSelected = { mode ->
                         viewModel.setSpeedOptimizationMode(mode)
-                    }
+                    },
+                    isGamingModeLocked = isGamingModeEnabled
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

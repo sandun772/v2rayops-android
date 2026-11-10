@@ -37,6 +37,7 @@ class UserPreferencesDataStore @Inject constructor(
         val CELLULAR_MTU = booleanPreferencesKey("cellular_mtu_optimized")
         val TCP_BUFFER_SIZE_KB = intPreferencesKey("tcp_buffer_size_kb")
         val DPI_DELAY_FIX = booleanPreferencesKey("dpi_delay_fix_enabled")
+        val GAMING_MODE = booleanPreferencesKey("gaming_mode_enabled")
     }
 
     val userSettingsFlow: Flow<UserSettings> = context.dataStore.data.map { preferences ->
@@ -60,7 +61,8 @@ class UserPreferencesDataStore @Inject constructor(
             downloadSpeedLimitMbps = preferences[PreferencesKeys.SPEED_LIMIT_MBPS] ?: 0,
             cellularMtuOptimized = preferences[PreferencesKeys.CELLULAR_MTU] ?: true,
             tcpBufferSizeKb = preferences[PreferencesKeys.TCP_BUFFER_SIZE_KB] ?: 64,
-            dpiDelayFixEnabled = preferences[PreferencesKeys.DPI_DELAY_FIX] ?: true
+            dpiDelayFixEnabled = preferences[PreferencesKeys.DPI_DELAY_FIX] ?: true,
+            gamingModeEnabled = preferences[PreferencesKeys.GAMING_MODE] ?: false
         )
     }
 
@@ -110,5 +112,9 @@ class UserPreferencesDataStore @Inject constructor(
 
     suspend fun setDpiDelayFixEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.DPI_DELAY_FIX] = enabled }
+    }
+
+    suspend fun setGamingModeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.GAMING_MODE] = enabled }
     }
 }

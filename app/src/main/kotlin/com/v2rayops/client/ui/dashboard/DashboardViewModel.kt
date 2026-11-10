@@ -12,7 +12,9 @@ import com.v2rayops.client.domain.model.SmartHuntStage
 import com.v2rayops.client.domain.model.TrafficStats
 import com.v2rayops.client.domain.model.UserProfile
 import com.v2rayops.client.domain.model.VpnConfig
+import com.v2rayops.client.domain.model.UserSettings
 import com.v2rayops.client.domain.repository.AuthRepository
+import com.v2rayops.client.domain.repository.SettingsRepository
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.network.ConnectionDiagnosticResult
 import com.v2rayops.client.network.ConnectionDiagnosticsManager
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -60,12 +63,20 @@ data class QuickAuditState(
 class DashboardViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val subscriptionRepository: SubscriptionRepository,
+    private val settingsRepository: SettingsRepository,
     private val vpnManager: VpnManager,
     private val diagnosticsManager: ConnectionDiagnosticsManager,
     private val benchmarkEngine: ThroughputBenchmarkEngine,
     private val ipHuntManager: IpHuntManager,
     private val dispatchers: AppDispatchers
 ) : ViewModel() {
+
+    val userSettings: StateFlow<UserSettings> = settingsRepository.observeSettings()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UserSettings())
+
+    val isGamingModeEnabled: StateFlow<Boolean> = userSettings
+        .map { it.gamingModeEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val connectionState: StateFlow<ConnectionState> = vpnManager.connectionState
     val trafficStats: StateFlow<TrafficStats> = vpnManager.trafficStats
@@ -566,12 +577,35 @@ class DashboardViewModel @Inject constructor(
     }
 
     /**
+     * Toggles Gaming Mode (Ultra-low ping mode for Free Fire, PUBG Mobile, etc.):
+     * - Auto-locks Speed & Optimization mode to STABILITY (1360 MTU, zero TLS fragmentation delay).
+     * - Clamps TCP buffers to 16KB to generate aggressive window backpressure, severely throttling background apps.
+     * - Disabling restores BALANCED optimization mode.
+     * - Seamlessly re-configures active VPN tunnel if currently connected.
+     */
+    fun toggleGamingMode() {
+        viewModelScope.launch {
+            val current = isGamingModeEnabled.value
+            val newTarget = !current
+            settingsRepository.setGamingModeEnabled(newTarget)
+
+            val targetMode = if (newTarget) SpeedOptimizationMode.STABILITY else SpeedOptimizationMode.BALANCED
+            setSpeedOptimizationMode(targetMode)
+        }
+    }
+
+    /**
      * Activates the selected Speed & Optimization mode (Balanced, Speed, or Stability)
      * by switching to the matching pre-tuned preset or dynamically adapting kernel/socket parameters.
      * Reconnects the active tunnel seamlessly if currently connected.
      */
     fun setSpeedOptimizationMode(mode: SpeedOptimizationMode) {
         viewModelScope.launch {
+            // If user manually switches away from Stability mode while Gaming Mode is on, disengage Gaming Mode
+            if (isGamingModeEnabled.value && mode != SpeedOptimizationMode.STABILITY) {
+                settingsRepository.setGamingModeEnabled(false)
+            }
+
             val allConfigs = configs.value
             val currentSelected = selectedConfig.value ?: allConfigs.firstOrNull() ?: return@launch
             val modeName = mode.name // "SPEED", "BALANCED", "STABILITY"

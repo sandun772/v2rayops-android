@@ -19,5 +19,6 @@ data class UserSettings(
     val downloadSpeedLimitMbps: Int = 0,
     val cellularMtuOptimized: Boolean = true,
     val tcpBufferSizeKb: Int = 64,
-    val dpiDelayFixEnabled: Boolean = true
+    val dpiDelayFixEnabled: Boolean = true,
+    val gamingModeEnabled: Boolean = false
 )

@@ -18,4 +18,5 @@ interface SettingsRepository {
     suspend fun setCellularMtuOptimized(optimized: Boolean)
     suspend fun setTcpBufferSizeKb(sizeKb: Int)
     suspend fun setDpiDelayFixEnabled(enabled: Boolean)
+    suspend fun setGamingModeEnabled(enabled: Boolean)
 }
