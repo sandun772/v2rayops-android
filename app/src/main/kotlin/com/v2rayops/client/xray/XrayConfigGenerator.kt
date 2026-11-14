@@ -35,7 +35,7 @@ class XrayConfigGenerator @Inject constructor(
         val effectiveMtu = if (settings.gamingModeEnabled) {
             1360
         } else {
-            config.customMtu ?: if (settings.cellularMtuOptimized) 1380 else 1500
+            config.customMtu ?: if (settings.cellularMtuOptimized) 1360 else 1500
         }
         val effectiveDpiFix = if (settings.gamingModeEnabled) {
             false
@@ -79,8 +79,8 @@ class XrayConfigGenerator @Inject constructor(
             val servers = JSONArray().apply {
                 put(effectiveDns)
                 put("8.8.8.8")
+                put("1.0.0.1")
                 put("tcp://1.1.1.1")
-                put("https://1.1.1.1/dns-query")
             }
             put("servers", servers)
             put("queryStrategy", "UseIPv4")
@@ -159,6 +159,7 @@ class XrayConfigGenerator @Inject constructor(
                         put("http")
                         put("tls")
                     })
+                    put("routeOnly", true)
                 })
             })
 
@@ -308,7 +309,7 @@ class XrayConfigGenerator @Inject constructor(
                     val sockopt = JSONObject().apply {
                         put("tcpNoDelay", true)
                         put("tcpKeepAliveInterval", keepAliveIntervalSec)
-                        if (effectiveDpiFix) {
+                        if (effectiveDpiFix && !parsed.networkType.equals("ws", ignoreCase = true)) {
                             put("dialerProxy", "fragment")
                         }
                     }
@@ -391,14 +392,6 @@ class XrayConfigGenerator @Inject constructor(
                 put("outboundTag", "proxy")
             })
 
-            // Block QUIC (UDP 443) so media apps (TikTok, YouTube, Instagram) immediately fall back to TCP HTTP/2
-            rules.put(JSONObject().apply {
-                put("type", "field")
-                put("port", "443")
-                put("network", "udp")
-                put("outboundTag", "block")
-            })
-
             // Bypass Private LAN
             rules.put(JSONObject().apply {
                 put("type", "field")
@@ -450,29 +443,29 @@ class XrayConfigGenerator @Inject constructor(
             val levels = JSONObject().apply {
                 // Level 0: Interactive & Low-Latency Tier
                 val level0 = JSONObject().apply {
-                    put("handshake", 4)
+                    put("handshake", 10)
                     put("connIdle", 300)
-                    put("uplinkOnly", 1)
-                    put("downlinkOnly", 1)
+                    put("uplinkOnly", 2)
+                    put("downlinkOnly", 5)
                     put("bufferSize", 16)
                 }
                 put("0", level0)
 
                 // Level 8: Standard / Smart QoS Tier
                 val level8 = JSONObject().apply {
-                    put("handshake", 4)
+                    put("handshake", 10)
                     put("connIdle", 300)
-                    put("uplinkOnly", 1)
-                    put("downlinkOnly", 1)
+                    put("uplinkOnly", 5)
+                    put("downlinkOnly", 10)
                     // Gaming Mode & Smart QoS: In Gaming Mode, clamp buffer size strictly to 16KB.
                     // This generates aggressive TCP sliding window backpressure, severely throttling
                     // background applications so game UDP packets face zero bufferbloat queue delay.
                     val bufKb = if (settings.gamingModeEnabled) {
                         16
                     } else if (effectiveSmartQoS) {
-                        effectiveTcpBufferKb.coerceIn(64, 4096)
+                        effectiveTcpBufferKb.coerceIn(256, 4096)
                     } else {
-                        64
+                        1024
                     }
                     put("bufferSize", bufKb)
                 }

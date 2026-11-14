@@ -11,8 +11,8 @@ import javax.inject.Singleton
 
 interface VpnServiceController {
     fun prepareVpn(context: Context): Intent?
-    fun startService(name: String, endpoint: String, configJson: String, mtu: Int = 1380)
-    fun startService(server: ServerNode, configJson: String, mtu: Int = 1380)
+    fun startService(name: String, endpoint: String, configJson: String, mtu: Int = 1360)
+    fun startService(server: ServerNode, configJson: String, mtu: Int = 1360)
     fun stopService()
 }
 

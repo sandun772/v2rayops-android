@@ -73,7 +73,7 @@ class XrayConfigGeneratorTest {
         val policyLevels = policy.getJSONObject("levels")
         assertTrue(policyLevels.has("0"))
         assertTrue(policyLevels.has("8"))
-        assertEquals(64, policyLevels.getJSONObject("8").getInt("bufferSize"))
+        assertEquals(1024, policyLevels.getJSONObject("8").getInt("bufferSize"))
         assertEquals(16, policyLevels.getJSONObject("0").getInt("bufferSize"))
     }
 
@@ -147,7 +147,7 @@ class XrayConfigGeneratorTest {
         assertTrue(dnsHosts.has("sg-v2rayops.vpnxhub.com"))
         assertTrue(dnsHosts.has("support.zoom.us"))
 
-        // Routing rules must block UDP 443 to force graceful HTTP/2 fallback for media streaming
+        // Routing rules must NOT block UDP 443 so HTTP/3 QUIC connects without 10-second timeout
         val rules = json.getJSONObject("routing").getJSONArray("rules")
         var quicBlocked = false
         for (i in 0 until rules.length()) {
@@ -156,7 +156,7 @@ class XrayConfigGeneratorTest {
                 quicBlocked = true
             }
         }
-        assertTrue("QUIC UDP 443 must be blocked in routing rules", quicBlocked)
+        assertFalse("QUIC UDP 443 must not be blocked in routing rules", quicBlocked)
     }
 
     @Test

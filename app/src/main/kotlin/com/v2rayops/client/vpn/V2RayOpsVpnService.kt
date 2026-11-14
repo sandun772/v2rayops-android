@@ -55,7 +55,7 @@ class V2RayOpsVpnService : VpnService() {
                 val serverName = intent.getStringExtra(EXTRA_SERVER_NAME) ?: "V2RayOps Server"
                 val serverEndpoint = intent.getStringExtra(EXTRA_SERVER_ENDPOINT) ?: ""
                 val configJson = intent.getStringExtra(EXTRA_CONFIG_JSON) ?: ""
-                val mtu = intent.getIntExtra(EXTRA_MTU, 1380)
+                val mtu = intent.getIntExtra(EXTRA_MTU, 1360)
                 startVpnTunnel(serverName, serverEndpoint, configJson, mtu)
             }
             ACTION_STOP -> {
@@ -68,7 +68,7 @@ class V2RayOpsVpnService : VpnService() {
 
     private val connectionLock = Any()
 
-    private fun startVpnTunnel(serverName: String, serverEndpoint: String, configJson: String, mtu: Int = 1380) {
+    private fun startVpnTunnel(serverName: String, serverEndpoint: String, configJson: String, mtu: Int = 1360) {
         synchronized(connectionLock) {
             // Clean up previous interface and engine safely
             try {

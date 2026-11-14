@@ -1,10 +1,26 @@
 package com.v2rayops.client.core.update
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VersionComparatorTest {
+
+    @Test
+    fun compare_ordersVersionsCorrectly() {
+        assertTrue(VersionComparator.compare("1.0.0", "1.0.1") < 0)
+        assertTrue(VersionComparator.compare("1.0.1", "1.0.0") > 0)
+        assertEquals(0, VersionComparator.compare("1.0.0", "1.0.0"))
+        assertEquals(0, VersionComparator.compare("v1.0.3", "1.0.3"))
+        assertTrue(VersionComparator.compare("v1.0.3", "v1.0.2") > 0)
+        assertTrue(VersionComparator.compare("v1.0.2", "v1.0.3") < 0)
+
+        // Verify maxWithOrNull picks highest release
+        val releases = listOf("v1.0.0", "v1.0.3", "v1.0.1", "v1.0.2")
+        val max = releases.maxWithOrNull { a, b -> VersionComparator.compare(a, b) }
+        assertEquals("v1.0.3", max)
+    }
 
     @Test
     fun isNewer_patchVersionBump_returnsTrue() {

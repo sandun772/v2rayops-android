@@ -122,7 +122,7 @@ class VpnManager @Inject constructor(
                 val effectiveMtu = if (settings.gamingModeEnabled) {
                     1360
                 } else {
-                    config.customMtu ?: if (settings.cellularMtuOptimized) 1380 else 1500
+                    config.customMtu ?: if (settings.cellularMtuOptimized) 1360 else 1500
                 }
 
                 AppLogger.i(TAG, "Requesting VPN Service start with config: ${config.displayName} (MTU: $effectiveMtu, SmartQoS: ${settings.smartQoSEnabled})")

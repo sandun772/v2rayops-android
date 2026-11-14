@@ -87,11 +87,7 @@ class AppUpdateManager @Inject constructor(
                         }
                         // Select release with strictly highest semantic version
                         selectedRelease = validReleases.maxWithOrNull { a, b ->
-                            when {
-                                VersionComparator.isNewer(a.tagName, b.tagName) -> 1
-                                VersionComparator.isNewer(b.tagName, a.tagName) -> -1
-                                else -> 0
-                            }
+                            VersionComparator.compare(a.tagName, b.tagName)
                         }
                     }
                 } catch (e: Exception) {
