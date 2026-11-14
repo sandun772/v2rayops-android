@@ -78,7 +78,7 @@ class NetworkOptimizerEngine @Inject constructor(
         context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
 
     suspend fun runFullAnalysis(
-        targetHost: String = "172.236.134.215",
+        targetHost: String = "172.237.84.45",
         port: Int = 443
     ): NetworkOptimizationReport = withContext(dispatchers.io) {
         AppLogger.i(TAG, "=== Starting Network Optimization Analysis ===")
@@ -111,7 +111,7 @@ class NetworkOptimizerEngine @Inject constructor(
 
         // 2. Latency & Jitter Probes (4 samples)
         val pingSamples = mutableListOf<Long>()
-        val targetIp = if (targetHost.contains("vpnxhub.com", ignoreCase = true)) "172.236.134.215" else targetHost
+        val targetIp = if (targetHost.contains("vpnxhub.com", ignoreCase = true)) "172.237.84.45" else targetHost
 
         for (i in 1..4) {
             val start = System.currentTimeMillis()

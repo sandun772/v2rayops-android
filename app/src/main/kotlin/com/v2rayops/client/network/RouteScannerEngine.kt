@@ -190,7 +190,7 @@ class RouteScannerEngine @Inject constructor(
 ) {
     companion object {
         private const val TAG = "RouteScanner"
-        const val DEFAULT_VPS_IP = "172.236.134.215"
+        const val DEFAULT_VPS_IP = "172.237.84.45"
         const val DEFAULT_VPS_DOMAIN = "sg-v2rayops.vpnxhub.com"
 
         private val RAW_BUG_DOMAINS = listOf(

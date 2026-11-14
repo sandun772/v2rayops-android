@@ -94,7 +94,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
     companion object {
         private const val TAG = "ConnectionDiagnostics"
         private const val LOCAL_PROXY_PORT = 10809
-        private const val V2RAYOPS_SERVER_IP = "172.236.134.215"
+        private const val V2RAYOPS_SERVER_IP = "172.237.84.45"
     }
 
     private fun getPhysicalNetwork(): Network? {
@@ -275,7 +275,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
     suspend fun measureEdgePing(targetConfig: VpnConfig?): Long = withContext(dispatchers.io) {
         val rawHost = targetConfig?.host?.ifBlank { "v2rayops.vpnxhub.com" } ?: "v2rayops.vpnxhub.com"
         val port = targetConfig?.port?.takeIf { it > 0 } ?: 443
-        val targetIp = if (rawHost.contains("vpnxhub.com", ignoreCase = true)) "172.236.134.215" else rawHost
+        val targetIp = if (rawHost.contains("vpnxhub.com", ignoreCase = true)) "172.237.84.45" else rawHost
         val resolved = try {
             InetAddress.getByName(targetIp)
         } catch (_: Exception) {
@@ -319,7 +319,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
         var dnsLatency = 0L
         try {
             val resolveTarget = if (host.contains("vpnxhub.com", ignoreCase = true)) {
-                "172.236.134.215"
+                "172.237.84.45"
             } else {
                 host
             }
@@ -334,7 +334,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
 
         // Prefer IPv4 addresses for maximum stability on cellular/Wi-Fi CDNs (IPv6 CDNs frequently drop TLS fronting)
         val ipv4Addresses = dnsIps.filter { !it.contains(":") }
-        val targetIp = ipv4Addresses.firstOrNull() ?: dnsIps.firstOrNull() ?: if (host.contains("vpnxhub.com", ignoreCase = true)) "172.236.134.215" else host
+        val targetIp = ipv4Addresses.firstOrNull() ?: dnsIps.firstOrNull() ?: if (host.contains("vpnxhub.com", ignoreCase = true)) "172.237.84.45" else host
 
         // 2. TCP Socket Connect
         val tcpStart = System.currentTimeMillis()

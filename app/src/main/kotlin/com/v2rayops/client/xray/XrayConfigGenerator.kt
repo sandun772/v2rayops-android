@@ -43,19 +43,20 @@ class XrayConfigGenerator @Inject constructor(
         val effectiveTcpBufferKb = if (settings.gamingModeEnabled) 16 else (config.customTcpBufferKb ?: settings.tcpBufferSizeKb)
         val keepAliveIntervalSec = if (settings.gamingModeEnabled) 5 else 15
 
+        val vpsIp = "172.237.84.45"
         val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
         val isVpsHost = { h: String ->
-            h.contains("vpnxhub.com", ignoreCase = true) || h == "172.236.134.215"
+            h.contains("vpnxhub.com", ignoreCase = true) || h == vpsIp || h == "172.236.134.215"
         }
 
         val outboundAddress = if (parsed != null) {
             if (isVpsHost(parsed.host)) {
-                "172.236.134.215"
+                vpsIp
             } else {
                 parsed.host
             }
         } else {
-            "172.236.134.215"
+            vpsIp
         }
 
         // 2. DNS
@@ -69,13 +70,13 @@ class XrayConfigGenerator @Inject constructor(
             put("servers", servers)
             put("queryStrategy", "UseIPv4")
             val hosts = JSONObject().apply {
-                put("sg-v2rayops.vpnxhub.com", "172.236.134.215")
-                put("v2rayops.vpnxhub.com", "172.236.134.215")
+                put("sg-v2rayops.vpnxhub.com", vpsIp)
+                put("v2rayops.vpnxhub.com", vpsIp)
                 put("dns.google", "8.8.8.8")
                 put("one.one.one.one", "1.1.1.1")
                 // Only map legitimate VPS origin cluster hostnames to avoid poisoning external CDN domains
                 if (parsed != null && isVpsHost(parsed.host) && !isIp(parsed.host)) {
-                    put(parsed.host, "172.236.134.215")
+                    put(parsed.host, vpsIp)
                 }
                 // Pre-resolve bug host domains to IPv4 so Xray dials directly without waiting for DNS
                 if (parsed != null && !isVpsHost(parsed.host) && !isIp(parsed.host)) {

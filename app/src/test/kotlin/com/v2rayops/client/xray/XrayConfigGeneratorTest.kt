@@ -144,7 +144,7 @@ class XrayConfigGeneratorTest {
 
         // DNS hosts mapping maps VPS cluster and maps known zoom edge
         val dnsHosts = json.getJSONObject("dns").getJSONObject("hosts")
-        assertEquals("172.236.134.215", dnsHosts.getString("sg-v2rayops.vpnxhub.com"))
+        assertEquals("172.237.84.45", dnsHosts.getString("sg-v2rayops.vpnxhub.com"))
         assertTrue(dnsHosts.has("support.zoom.us"))
 
         // Routing rules must block UDP 443 to force graceful HTTP/2 fallback for media streaming

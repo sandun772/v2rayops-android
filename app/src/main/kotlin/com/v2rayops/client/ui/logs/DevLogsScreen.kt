@@ -634,7 +634,7 @@ fun DevLogsScreen(
                                 viewModel.setProbeWsHost("sg-v2rayops.vpnxhub.com")
                             }
                             DevPresetChip("STANDARD SNI") {
-                                viewModel.setProbeTargetHost("172.236.134.215")
+                                viewModel.setProbeTargetHost("172.237.84.45")
                                 viewModel.setProbeTargetPort(443)
                                 viewModel.setProbeSni("support.zoom.us")
                                 viewModel.setProbeWsHost("sg-v2rayops.vpnxhub.com")
