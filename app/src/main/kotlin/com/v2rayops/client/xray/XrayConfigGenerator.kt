@@ -248,16 +248,38 @@ class XrayConfigGenerator @Inject constructor(
                         }
                         put("realitySettings", realitySettings)
                     } else if (parsed.security == "tls") {
-                        val isFronting = parsed.allowInsecure ||
-                                config.isAddrFronting ||
-                                (!effectiveSni.equals(parsed.host, ignoreCase = true)) ||
-                                (!effectiveSni.equals(effectiveWsHost, ignoreCase = true)) ||
-                                (!effectiveSni.contains("vpnxhub.com", ignoreCase = true))
+                        val candidateDomains = linkedSetOf<String>()
+
+                        val addDomainWithWildcards: (String) -> Unit = { raw ->
+                            if (raw.isNotBlank() && !isIp(raw)) {
+                                candidateDomains.add(raw)
+                                val parts = raw.split(".")
+                                if (parts.size >= 2) {
+                                    val rootDomain = parts.takeLast(2).joinToString(".")
+                                    candidateDomains.add(rootDomain)
+                                    candidateDomains.add("*.$rootDomain")
+                                    if (parts.size >= 3) {
+                                        val parent = parts.drop(1).joinToString(".")
+                                        candidateDomains.add(parent)
+                                        candidateDomains.add("*.$parent")
+                                    }
+                                }
+                            }
+                        }
+
+                        addDomainWithWildcards(effectiveWsHost)
+                        addDomainWithWildcards(parsed.host)
+
+                        // Cluster origin & CDN fallback cert identities
+                        candidateDomains.add("sg-v2rayops.vpnxhub.com")
+                        candidateDomains.add("v2rayops.vpnxhub.com")
+                        candidateDomains.add("vpnxhub.com")
+                        candidateDomains.add("*.vpnxhub.com")
 
                         val tlsSettings = JSONObject().apply {
                             put("serverName", effectiveSni)
-                            if (isFronting) {
-                                put("allowInsecure", true)
+                            if (candidateDomains.isNotEmpty()) {
+                                put("verifyPeerCertByName", candidateDomains.joinToString(","))
                             }
                             put("fingerprint", "chrome")
                             if (parsed.networkType.equals("ws", ignoreCase = true)) {

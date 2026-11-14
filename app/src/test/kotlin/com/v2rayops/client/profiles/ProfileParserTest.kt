@@ -69,11 +69,12 @@ class ProfileParserTest {
         val jsonManual = generator.generateJson(cfgManual, settings)
         val jsonAuto = generator.generateJson(cfgAuto, settings)
 
-        val allowInsecureManual = org.json.JSONObject(jsonManual).getJSONArray("outbounds").getJSONObject(0).getJSONObject("streamSettings").getJSONObject("tlsSettings").getBoolean("allowInsecure")
-        val allowInsecureAuto = org.json.JSONObject(jsonAuto).getJSONArray("outbounds").getJSONObject(0).getJSONObject("streamSettings").getJSONObject("tlsSettings").getBoolean("allowInsecure")
+        val vcnManual = org.json.JSONObject(jsonManual).getJSONArray("outbounds").getJSONObject(0).getJSONObject("streamSettings").getJSONObject("tlsSettings").getString("verifyPeerCertByName")
+        val vcnAuto = org.json.JSONObject(jsonAuto).getJSONArray("outbounds").getJSONObject(0).getJSONObject("streamSettings").getJSONObject("tlsSettings").getString("verifyPeerCertByName")
 
-        assertEquals(allowInsecureManual, allowInsecureAuto)
-        org.junit.Assert.assertTrue(allowInsecureManual)
+        assertEquals(vcnManual, vcnAuto)
+        org.junit.Assert.assertTrue(vcnAuto.contains("*.vpnxhub.com"))
+        org.junit.Assert.assertTrue(vcnAuto.contains("vpnxhub.com"))
         org.junit.Assert.assertTrue(pManual?.allowInsecure == true)
     }
 
