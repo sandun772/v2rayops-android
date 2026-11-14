@@ -94,7 +94,6 @@ class ConnectionDiagnosticsManager @Inject constructor(
     companion object {
         private const val TAG = "ConnectionDiagnostics"
         private const val LOCAL_PROXY_PORT = 10809
-        private const val V2RAYOPS_SERVER_IP = "172.237.84.45"
     }
 
     private fun getPhysicalNetwork(): Network? {
@@ -227,8 +226,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
                 )
             }
 
-            val isServerExit = ip == V2RAYOPS_SERVER_IP ||
-                    countryCode.equals("SG", ignoreCase = true) ||
+            val isServerExit = countryCode.equals("SG", ignoreCase = true) ||
                     isp.contains("Akamai", ignoreCase = true) ||
                     isp.contains("Linode", ignoreCase = true)
 
@@ -273,11 +271,11 @@ class ConnectionDiagnosticsManager @Inject constructor(
      * Measures low-latency TCP edge ping to the server endpoint (returns round-trip in ms, e.g. 70-160ms).
      */
     suspend fun measureEdgePing(targetConfig: VpnConfig?): Long = withContext(dispatchers.io) {
-        val rawHost = targetConfig?.host?.ifBlank { "v2rayops.vpnxhub.com" } ?: "v2rayops.vpnxhub.com"
+        val rawHost = targetConfig?.host?.ifBlank { "sg-v2rayops.vpnxhub.com" } ?: "sg-v2rayops.vpnxhub.com"
         val port = targetConfig?.port?.takeIf { it > 0 } ?: 443
-        val targetIp = if (rawHost.contains("vpnxhub.com", ignoreCase = true)) "172.237.84.45" else rawHost
         val resolved = try {
-            InetAddress.getByName(targetIp)
+            val addrs = InetAddress.getAllByName(rawHost)
+            addrs.firstOrNull { it is java.net.Inet4Address } ?: addrs.firstOrNull() ?: InetAddress.getByName(rawHost)
         } catch (_: Exception) {
             null
         } ?: return@withContext -1L
@@ -290,7 +288,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
             }
             (System.currentTimeMillis() - start).coerceAtLeast(1L)
         } catch (e: Exception) {
-            AppLogger.d(TAG, "measureEdgePing failed to $targetIp:$port: ${e.message}")
+            AppLogger.d(TAG, "measureEdgePing failed to ${resolved.hostAddress}:$port: ${e.message}")
             -1L
         }
     }
@@ -318,12 +316,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
         var dnsIps = emptyList<String>()
         var dnsLatency = 0L
         try {
-            val resolveTarget = if (host.contains("vpnxhub.com", ignoreCase = true)) {
-                "172.237.84.45"
-            } else {
-                host
-            }
-            val addresses = InetAddress.getAllByName(resolveTarget)
+            val addresses = InetAddress.getAllByName(host)
             dnsIps = addresses.map { it.hostAddress ?: "" }.filter { it.isNotBlank() }
             dnsLatency = System.currentTimeMillis() - dnsStart
             AppLogger.i(TAG, "[Probe-DNS] Resolved $host -> ${dnsIps.joinToString()} in ${dnsLatency}ms")
@@ -334,7 +327,7 @@ class ConnectionDiagnosticsManager @Inject constructor(
 
         // Prefer IPv4 addresses for maximum stability on cellular/Wi-Fi CDNs (IPv6 CDNs frequently drop TLS fronting)
         val ipv4Addresses = dnsIps.filter { !it.contains(":") }
-        val targetIp = ipv4Addresses.firstOrNull() ?: dnsIps.firstOrNull() ?: if (host.contains("vpnxhub.com", ignoreCase = true)) "172.237.84.45" else host
+        val targetIp = ipv4Addresses.firstOrNull() ?: dnsIps.firstOrNull() ?: host
 
         // 2. TCP Socket Connect
         val tcpStart = System.currentTimeMillis()

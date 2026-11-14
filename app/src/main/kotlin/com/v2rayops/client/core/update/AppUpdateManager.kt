@@ -74,31 +74,58 @@ class AppUpdateManager @Inject constructor(
                 val owner = BuildConfig.GITHUB_REPO_OWNER
                 val repo = BuildConfig.GITHUB_REPO_NAME
 
-                val response = try {
-                    gitHubReleaseApi.getLatestRelease(owner = owner, repo = repo)
+                // 1. Fetch all releases from GitHub to inspect published tags
+                var selectedRelease: com.v2rayops.client.data.api.GitHubReleaseDto? = null
+
+                try {
+                    val releasesResp = gitHubReleaseApi.getReleases(owner = owner, repo = repo)
+                    if (releasesResp.isSuccessful && !releasesResp.body().isNullOrEmpty()) {
+                        val all = releasesResp.body()!!
+                        // Filter for non-draft releases that contain an installable APK asset
+                        val validReleases = all.filter {
+                            !it.draft && it.assets.any { asset -> asset.name.endsWith(".apk", ignoreCase = true) }
+                        }
+                        // Select release with strictly highest semantic version
+                        selectedRelease = validReleases.maxWithOrNull { a, b ->
+                            when {
+                                VersionComparator.isNewer(a.tagName, b.tagName) -> 1
+                                VersionComparator.isNewer(b.tagName, a.tagName) -> -1
+                                else -> 0
+                            }
+                        }
+                    }
                 } catch (e: Exception) {
-                    AppLogger.w(TAG, "Direct GitHub release check failed (${e.message}). Attempting fallback relay...")
-                    val fallbackUrl = "${BuildConfig.DEFAULT_BASE_URL.trimEnd('/')}/api/client/update-check"
-                    gitHubReleaseApi.getReleaseFromUrl(fallbackUrl)
+                    AppLogger.w(TAG, "Failed to query releases list: ${e.message}")
                 }
 
-                if (response.code() == 404) {
-                    // Repository has no releases published yet or repo is not yet populated
-                    AppLogger.w(TAG, "No GitHub releases found for $owner/$repo (HTTP 404). Current build is up to date.")
+                // 2. Fallback to /releases/latest or relay if release list was empty or failed
+                if (selectedRelease == null) {
+                    val directResp = try {
+                        gitHubReleaseApi.getLatestRelease(owner = owner, repo = repo)
+                    } catch (e: Exception) {
+                        AppLogger.w(TAG, "Direct GitHub latest release check failed (${e.message}). Attempting fallback relay...")
+                        val fallbackUrl = "${BuildConfig.DEFAULT_BASE_URL.trimEnd('/')}/api/client/update-check"
+                        try {
+                            gitHubReleaseApi.getReleaseFromUrl(fallbackUrl)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+
+                    if (directResp != null && directResp.isSuccessful && directResp.body() != null) {
+                        selectedRelease = directResp.body()
+                    }
+                }
+
+                if (selectedRelease == null) {
+                    AppLogger.w(TAG, "No releases found for $owner/$repo. Current build is up to date.")
                     _updateState.value = UpdateUiState.UpToDate(currentVersion, isManual)
                     return@launch
                 }
 
-                if (!response.isSuccessful || response.body() == null) {
-                    val errorMsg = "Update check failed (HTTP ${response.code()})"
-                    AppLogger.e(TAG, errorMsg)
-                    _updateState.value = UpdateUiState.Error(errorMsg, isManual)
-                    return@launch
-                }
-
-                val release = response.body()!!
+                val release = selectedRelease
                 val remoteVersion = release.tagName
-                AppLogger.i(TAG, "Latest release found: ${release.tagName} (name: ${release.name})")
+                AppLogger.i(TAG, "Latest target release evaluated: ${release.tagName} (name: ${release.name})")
 
                 val isNewer = VersionComparator.isNewer(currentVersion, remoteVersion)
                 val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }

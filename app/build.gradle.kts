@@ -22,6 +22,7 @@ android {
         }
 
         buildConfigField("String", "DEFAULT_BASE_URL", "\"https://v2rayops.vpnxhub.com:2083/\"")
+        buildConfigField("String", "DEFAULT_SERVER_HOST", "\"sg-v2rayops.vpnxhub.com\"")
         buildConfigField("String", "GITHUB_REPO_OWNER", "\"sandun772\"")
         buildConfigField("String", "GITHUB_REPO_NAME", "\"v2rayops-android\"")
     }

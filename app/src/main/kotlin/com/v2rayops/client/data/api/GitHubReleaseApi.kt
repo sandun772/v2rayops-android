@@ -15,6 +15,8 @@ data class GitHubReleaseDto(
     @Json(name = "body") val body: String? = null,
     @Json(name = "published_at") val publishedAt: String? = null,
     @Json(name = "html_url") val htmlUrl: String? = null,
+    @Json(name = "draft") val draft: Boolean = false,
+    @Json(name = "prerelease") val prerelease: Boolean = false,
     @Json(name = "assets") val assets: List<GitHubAssetDto> = emptyList()
 )
 
@@ -27,6 +29,14 @@ data class GitHubAssetDto(
 )
 
 interface GitHubReleaseApi {
+
+    @GET("https://api.github.com/repos/{owner}/{repo}/releases")
+    suspend fun getReleases(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Header("Accept") accept: String = "application/vnd.github.v3+json",
+        @Header("User-Agent") userAgent: String = "V2RayOps-Android"
+    ): Response<List<GitHubReleaseDto>>
 
     @GET("https://api.github.com/repos/{owner}/{repo}/releases/latest")
     suspend fun getLatestRelease(

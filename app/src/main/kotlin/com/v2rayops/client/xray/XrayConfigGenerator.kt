@@ -1,11 +1,14 @@
 package com.v2rayops.client.xray
 
+import com.v2rayops.client.BuildConfig
 import com.v2rayops.client.domain.model.RoutingMode
 import com.v2rayops.client.domain.model.UserSettings
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.profiles.ProfileParser
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.Inet4Address
+import java.net.InetAddress
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -43,20 +46,32 @@ class XrayConfigGenerator @Inject constructor(
         val effectiveTcpBufferKb = if (settings.gamingModeEnabled) 16 else (config.customTcpBufferKb ?: settings.tcpBufferSizeKb)
         val keepAliveIntervalSec = if (settings.gamingModeEnabled) 5 else 15
 
-        val vpsIp = "172.237.84.45"
         val isIp = { s: String -> s.matches(Regex("^[0-9.]+$")) || s.contains(":") }
         val isVpsHost = { h: String ->
-            h.contains("vpnxhub.com", ignoreCase = true) || h == vpsIp || h == "172.236.134.215"
+            h.contains("vpnxhub.com", ignoreCase = true) || h.equals(BuildConfig.DEFAULT_SERVER_HOST, ignoreCase = true)
+        }
+
+        // Dynamically resolve target host to IPv4 so Xray dials directly without cellular DNS blocking
+        val targetHost = parsed?.host?.ifBlank { BuildConfig.DEFAULT_SERVER_HOST } ?: BuildConfig.DEFAULT_SERVER_HOST
+        val resolvedIp = if (!isIp(targetHost)) {
+            try {
+                val addrs = InetAddress.getAllByName(targetHost)
+                addrs.firstOrNull { it is Inet4Address }?.hostAddress ?: addrs.firstOrNull()?.hostAddress ?: targetHost
+            } catch (_: Exception) {
+                targetHost
+            }
+        } else {
+            targetHost
         }
 
         val outboundAddress = if (parsed != null) {
             if (isVpsHost(parsed.host)) {
-                vpsIp
+                resolvedIp
             } else {
                 parsed.host
             }
         } else {
-            vpsIp
+            resolvedIp
         }
 
         // 2. DNS
@@ -70,19 +85,31 @@ class XrayConfigGenerator @Inject constructor(
             put("servers", servers)
             put("queryStrategy", "UseIPv4")
             val hosts = JSONObject().apply {
-                put("sg-v2rayops.vpnxhub.com", vpsIp)
-                put("v2rayops.vpnxhub.com", vpsIp)
                 put("dns.google", "8.8.8.8")
                 put("one.one.one.one", "1.1.1.1")
-                // Only map legitimate VPS origin cluster hostnames to avoid poisoning external CDN domains
-                if (parsed != null && isVpsHost(parsed.host) && !isIp(parsed.host)) {
-                    put(parsed.host, vpsIp)
+                // Pre-resolve target VPS host dynamically into DNS hosts
+                if (targetHost != resolvedIp && isIp(resolvedIp)) {
+                    put(targetHost, resolvedIp)
+                    if (targetHost.contains("sg-v2rayops.vpnxhub.com", ignoreCase = true)) {
+                        put("v2rayops.vpnxhub.com", resolvedIp)
+                    }
+                }
+                // Pre-resolve WebSocket host domain if fronting
+                val effectiveWsHost = parsed?.wsHost?.ifBlank { parsed.host } ?: ""
+                if (effectiveWsHost.isNotBlank() && !isIp(effectiveWsHost) && !has(effectiveWsHost)) {
+                    try {
+                        val resolved = InetAddress.getAllByName(effectiveWsHost)
+                        val ipv4 = resolved.firstOrNull { it is Inet4Address }?.hostAddress
+                        if (!ipv4.isNullOrBlank()) {
+                            put(effectiveWsHost, ipv4)
+                        }
+                    } catch (_: Exception) {}
                 }
                 // Pre-resolve bug host domains to IPv4 so Xray dials directly without waiting for DNS
                 if (parsed != null && !isVpsHost(parsed.host) && !isIp(parsed.host)) {
                     try {
-                        val resolved = java.net.InetAddress.getAllByName(parsed.host)
-                        val ipv4 = resolved.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+                        val resolved = InetAddress.getAllByName(parsed.host)
+                        val ipv4 = resolved.firstOrNull { it is Inet4Address }?.hostAddress
                         if (!ipv4.isNullOrBlank()) {
                             put(parsed.host, ipv4)
                         }
@@ -221,39 +248,16 @@ class XrayConfigGenerator @Inject constructor(
                         }
                         put("realitySettings", realitySettings)
                     } else if (parsed.security == "tls") {
-                        val candidateDomains = linkedSetOf<String>()
-
-                        val addDomainWithWildcards: (String) -> Unit = { raw ->
-                            if (raw.isNotBlank() && !isIp(raw)) {
-                                candidateDomains.add(raw)
-                                val parts = raw.split(".")
-                                if (parts.size >= 2) {
-                                    val rootDomain = parts.takeLast(2).joinToString(".")
-                                    candidateDomains.add(rootDomain)
-                                    candidateDomains.add("*.$rootDomain")
-                                    if (parts.size >= 3) {
-                                        val parent = parts.drop(1).joinToString(".")
-                                        candidateDomains.add(parent)
-                                        candidateDomains.add("*.$parent")
-                                    }
-                                }
-                            }
-                        }
-
-                        addDomainWithWildcards(effectiveWsHost)
-                        addDomainWithWildcards(parsed.host)
-                        addDomainWithWildcards(effectiveSni)
-
-                        // Cluster origin & CDN fallback cert identities
-                        candidateDomains.add("sg-v2rayops.vpnxhub.com")
-                        candidateDomains.add("v2rayops.vpnxhub.com")
-                        candidateDomains.add("vpnxhub.com")
-                        candidateDomains.add("*.vpnxhub.com")
+                        val isFronting = parsed.allowInsecure ||
+                                config.isAddrFronting ||
+                                (!effectiveSni.equals(parsed.host, ignoreCase = true)) ||
+                                (!effectiveSni.equals(effectiveWsHost, ignoreCase = true)) ||
+                                (!effectiveSni.contains("vpnxhub.com", ignoreCase = true))
 
                         val tlsSettings = JSONObject().apply {
                             put("serverName", effectiveSni)
-                            if (candidateDomains.isNotEmpty()) {
-                                put("verifyPeerCertByName", candidateDomains.joinToString(","))
+                            if (isFronting) {
+                                put("allowInsecure", true)
                             }
                             put("fingerprint", "chrome")
                             if (parsed.networkType.equals("ws", ignoreCase = true)) {

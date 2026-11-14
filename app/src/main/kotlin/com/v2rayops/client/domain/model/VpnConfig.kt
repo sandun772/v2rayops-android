@@ -42,7 +42,7 @@ data class VpnConfig(
         get() = if (host.isNotBlank()) "$host:$port" else "v2rayops.vpnxhub.com:443"
 
     val isVpsHost: Boolean
-        get() = host.contains("vpnxhub.com", ignoreCase = true) || host == "172.237.84.45" || host == "172.236.134.215"
+        get() = host.contains("vpnxhub.com", ignoreCase = true)
 
     val activeSni: String
         get() {
@@ -58,12 +58,9 @@ data class VpnConfig(
     val isAddrFronting: Boolean
         get() = !isVpsHost && (
             wsHost.contains("vpnxhub.com", ignoreCase = true) ||
-            wsHost == "172.237.84.45" ||
-            wsHost == "172.236.134.215" ||
             sni.contains("vpnxhub.com", ignoreCase = true) ||
             configUri.contains("vpnxhub.com", ignoreCase = true) ||
-            configUri.contains("172.237.84.45") ||
-            configUri.contains("172.236.134.215")
+            (wsHost.isNotBlank() && !wsHost.equals(host, ignoreCase = true))
         )
 
     val effectiveAddr: String

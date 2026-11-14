@@ -190,8 +190,14 @@ class RouteScannerEngine @Inject constructor(
 ) {
     companion object {
         private const val TAG = "RouteScanner"
-        const val DEFAULT_VPS_IP = "172.237.84.45"
         const val DEFAULT_VPS_DOMAIN = "sg-v2rayops.vpnxhub.com"
+        val DEFAULT_VPS_IP: String
+            get() = try {
+                val addrs = java.net.InetAddress.getAllByName(DEFAULT_VPS_DOMAIN)
+                addrs.firstOrNull { it is java.net.Inet4Address }?.hostAddress ?: addrs.firstOrNull()?.hostAddress ?: DEFAULT_VPS_DOMAIN
+            } catch (_: Exception) {
+                DEFAULT_VPS_DOMAIN
+            }
 
         private val RAW_BUG_DOMAINS = listOf(
             // Zoom / Education / Work & Learn

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.telephony.TelephonyManager
+import com.v2rayops.client.BuildConfig
 import com.v2rayops.client.core.dispatchers.AppDispatchers
 import com.v2rayops.client.core.logger.AppLogger
 import com.v2rayops.client.domain.repository.SettingsRepository
@@ -78,7 +79,7 @@ class NetworkOptimizerEngine @Inject constructor(
         context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
 
     suspend fun runFullAnalysis(
-        targetHost: String = "172.237.84.45",
+        targetHost: String = BuildConfig.DEFAULT_SERVER_HOST,
         port: Int = 443
     ): NetworkOptimizationReport = withContext(dispatchers.io) {
         AppLogger.i(TAG, "=== Starting Network Optimization Analysis ===")
@@ -111,7 +112,12 @@ class NetworkOptimizerEngine @Inject constructor(
 
         // 2. Latency & Jitter Probes (4 samples)
         val pingSamples = mutableListOf<Long>()
-        val targetIp = if (targetHost.contains("vpnxhub.com", ignoreCase = true)) "172.237.84.45" else targetHost
+        val targetIp = try {
+            val addrs = InetAddress.getAllByName(targetHost)
+            addrs.firstOrNull { it is java.net.Inet4Address }?.hostAddress ?: addrs.firstOrNull()?.hostAddress ?: targetHost
+        } catch (_: Exception) {
+            targetHost
+        }
 
         for (i in 1..4) {
             val start = System.currentTimeMillis()
