@@ -42,14 +42,14 @@ data class LogEntry(
 
 object AppLogger {
     private const val DEFAULT_TAG = "V2RayOps"
-    private const val MAX_LOGS = 1000
-    private var logFile: java.io.File? = null
+    private const val MAX_LOGS = 100
 
     fun initLogFile(dir: java.io.File) {
+        // Zero-disk-footprint policy: remove any legacy log files to conserve user device storage
         try {
-            logFile = java.io.File(dir, "app_debug.log")
-            if (logFile?.exists() == true && (logFile?.length() ?: 0) > 2 * 1024 * 1024) {
-                logFile?.delete()
+            val legacyFile = java.io.File(dir, "app_debug.log")
+            if (legacyFile.exists()) {
+                legacyFile.delete()
             }
         } catch (_: Exception) {}
     }
@@ -60,7 +60,7 @@ object AppLogger {
     private val logBuffer = ConcurrentLinkedDeque<LogEntry>()
 
     init {
-        i("AppLogger", "V2RayOPS Developer Logging Subsystem Initialized")
+        i("AppLogger", "V2RayOPS In-Memory Logging Subsystem Initialized")
     }
 
     fun d(tag: String = DEFAULT_TAG, message: String) {
@@ -95,9 +95,6 @@ object AppLogger {
             logBuffer.pollFirst()
         }
         _logsFlow.value = logBuffer.toList()
-        try {
-            logFile?.appendText(entry.toFormattedLine() + "\n")
-        } catch (_: Exception) {}
     }
 
     fun clear() {
@@ -110,28 +107,23 @@ object AppLogger {
         return logBuffer.joinToString("\n") { it.toFormattedLine() }
     }
 
+    /**
+     * Returns an optimized, structured list of the most recent warning/error events
+     * and state transitions for failure diagnostics (zero irrelevant debug noise).
+     */
+    fun getDiagnosticBreadcrumbs(limit: Int = 25): List<String> {
+        return logBuffer.filter { it.level == LogLevel.WARN || it.level == LogLevel.ERROR }
+            .takeLast(limit)
+            .map { it.toFormattedLine() }
+    }
+
     fun getFullDiagnosticDump(): String {
         val sb = StringBuilder()
-        sb.appendLine("=== V2RayOPS Application Dev Logs ===")
+        sb.appendLine("=== V2RayOPS Application Diagnostics Breadcrumbs ===")
         sb.appendLine("Dump Time: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())}")
-        sb.appendLine("Total In-App Log Entries: ${logBuffer.size}")
         sb.appendLine("----------------------------------------")
-        sb.appendLine(getFormattedLogs())
+        getDiagnosticBreadcrumbs(50).forEach { sb.appendLine(it) }
         sb.appendLine("----------------------------------------")
-
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "120"))
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
-            sb.appendLine("=== Process Logcat (Recent 120 Lines) ===")
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                sb.appendLine(line)
-            }
-            process.waitFor()
-        } catch (t: Throwable) {
-            sb.appendLine("Could not read logcat: ${t.message}")
-        }
-        sb.appendLine("=== End of Diagnostics Dump ===")
         return sb.toString()
     }
 }

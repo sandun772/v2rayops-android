@@ -107,3 +107,26 @@ data class DevReportResponseDto(
     @Json(name = "message") val message: String? = null,
     @Json(name = "error") val error: String? = null
 )
+
+/**
+ * Lightweight, structured diagnostic report uploaded strictly when multiple
+ * consecutive connection attempts fail (3+ threshold), without capturing
+ * continuous background user data or raw system logcat spam.
+ */
+@JsonClass(generateAdapter = true)
+data class StructuredIncidentReportDto(
+    @Json(name = "customerCode") val customerCode: String,
+    @Json(name = "failureReasonCode") val failureReasonCode: String,
+    @Json(name = "consecutiveFailures") val consecutiveFailures: Int,
+    @Json(name = "carrierName") val carrierName: String,
+    @Json(name = "networkType") val networkType: String,
+    @Json(name = "endpointHost") val endpointHost: String,
+    @Json(name = "endpointPort") val endpointPort: Int,
+    @Json(name = "sni") val sni: String,
+    @Json(name = "alpn") val alpn: String,
+    @Json(name = "deviceModel") val deviceModel: String,
+    @Json(name = "androidVersion") val androidVersion: String,
+    @Json(name = "appVersion") val appVersion: String = "1.0.4",
+    @Json(name = "timestamp") val timestamp: Long = System.currentTimeMillis(),
+    @Json(name = "breadcrumbs") val breadcrumbs: List<String> = emptyList()
+)

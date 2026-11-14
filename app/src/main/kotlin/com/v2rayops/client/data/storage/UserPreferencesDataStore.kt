@@ -38,6 +38,10 @@ class UserPreferencesDataStore @Inject constructor(
         val TCP_BUFFER_SIZE_KB = intPreferencesKey("tcp_buffer_size_kb")
         val DPI_DELAY_FIX = booleanPreferencesKey("dpi_delay_fix_enabled")
         val GAMING_MODE = booleanPreferencesKey("gaming_mode_enabled")
+        val REMOTE_SETTINGS_VERSION = longPreferencesKey("remote_settings_version")
+        val REMOTE_MANAGEMENT_ENABLED = booleanPreferencesKey("remote_management_enabled")
+        val LAST_REMOTE_SYNC_TIMESTAMP = longPreferencesKey("last_remote_sync_timestamp")
+        val LAST_REMOTE_SYNC_STATUS = stringPreferencesKey("last_remote_sync_status")
     }
 
     val userSettingsFlow: Flow<UserSettings> = context.dataStore.data.map { preferences ->
@@ -116,5 +120,37 @@ class UserPreferencesDataStore @Inject constructor(
 
     suspend fun setGamingModeEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.GAMING_MODE] = enabled }
+    }
+
+    val remoteSettingsVersionFlow: Flow<Long> = context.dataStore.data.map {
+        it[PreferencesKeys.REMOTE_SETTINGS_VERSION] ?: 0L
+    }
+
+    val remoteManagementEnabledFlow: Flow<Boolean> = context.dataStore.data.map {
+        it[PreferencesKeys.REMOTE_MANAGEMENT_ENABLED] ?: true
+    }
+
+    val lastRemoteSyncStatusFlow: Flow<String> = context.dataStore.data.map {
+        it[PreferencesKeys.LAST_REMOTE_SYNC_STATUS] ?: "Not Synced"
+    }
+
+    val lastRemoteSyncTimestampFlow: Flow<Long> = context.dataStore.data.map {
+        it[PreferencesKeys.LAST_REMOTE_SYNC_TIMESTAMP] ?: 0L
+    }
+
+    suspend fun setRemoteSettingsVersion(version: Long) {
+        context.dataStore.edit { it[PreferencesKeys.REMOTE_SETTINGS_VERSION] = version }
+    }
+
+    suspend fun setRemoteManagementEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.REMOTE_MANAGEMENT_ENABLED] = enabled }
+    }
+
+    suspend fun recordRemoteSync(version: Long, status: String) {
+        context.dataStore.edit {
+            it[PreferencesKeys.REMOTE_SETTINGS_VERSION] = version
+            it[PreferencesKeys.LAST_REMOTE_SYNC_TIMESTAMP] = System.currentTimeMillis()
+            it[PreferencesKeys.LAST_REMOTE_SYNC_STATUS] = status
+        }
     }
 }

@@ -15,6 +15,7 @@ import com.v2rayops.client.network.QoSStatus
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.TimeUnit
+import com.v2rayops.client.network.FailureDiagnosticsTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +38,7 @@ class VpnManager @Inject constructor(
     private val configGenerator: XrayConfigGenerator,
     private val settingsRepository: SettingsRepository,
     private val adaptiveQoSEngine: AdaptiveQoSEngine,
+    private val failureDiagnosticsTracker: FailureDiagnosticsTracker,
     private val dispatchers: AppDispatchers
 ) {
     companion object {
@@ -77,6 +79,7 @@ class VpnManager @Inject constructor(
                         )
                         startTrafficPolling()
                         startHealthMonitoring()
+                        failureDiagnosticsTracker.recordSuccess()
                     }
                     is XrayState.Starting -> {
                         val cfg = currentConfig
@@ -95,6 +98,7 @@ class VpnManager @Inject constructor(
                         stopTrafficPolling()
                         stopHealthMonitoring()
                         _connectionState.value = ConnectionState.Error(xrayState.error)
+                        failureDiagnosticsTracker.recordFailure(xrayState.error, currentConfig)
                     }
                     is XrayState.BinaryPending -> {
                         stopTrafficPolling()
@@ -130,10 +134,41 @@ class VpnManager @Inject constructor(
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Failed to initiate VPN connection", e)
                 _connectionState.value = ConnectionState.Error(e.message ?: "Failed to generate tunnel configuration")
+                failureDiagnosticsTracker.recordFailure(e.message ?: "TunnelConfigGenerationFailed", config, e)
                 vpnController.stopService()
             } finally {
                 delay(600)
                 isConnectInProgress = false
+            }
+        }
+    }
+
+    /**
+     * Hot-reloads running Xray engine with updated remote settings or VLESS URL
+     * without tearing down the Android VPN interface or requiring OS re-authorization.
+     */
+    fun hotReloadTunnel(updatedConfig: VpnConfig? = null) {
+        scope.launch {
+            val state = _connectionState.value
+            if (state !is ConnectionState.Connected) {
+                AppLogger.d(TAG, "Hot-reload skipped: tunnel is not currently connected")
+                return@launch
+            }
+            val config = updatedConfig ?: currentConfig ?: return@launch
+            try {
+                currentConfig = config
+                val settings = settingsRepository.observeSettings().first()
+                val configJson = configGenerator.generateJson(config, settings)
+                val effectiveMtu = if (settings.gamingModeEnabled) {
+                    1360
+                } else {
+                    config.customMtu ?: if (settings.cellularMtuOptimized) 1360 else 1500
+                }
+
+                AppLogger.i(TAG, "Hot-reloading active tunnel with remote settings update: ${config.displayName} (MTU: $effectiveMtu)")
+                vpnController.startService(config.displayName, config.displayEndpoint, configJson, effectiveMtu)
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Failed to hot-reload active tunnel", e)
             }
         }
     }

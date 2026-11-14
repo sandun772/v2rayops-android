@@ -7,6 +7,7 @@ import com.v2rayops.client.core.result.AppResult
 import com.v2rayops.client.data.api.V2RayOpsClientApi
 import com.v2rayops.client.data.api.dto.HeartbeatRequestDto
 import com.v2rayops.client.data.storage.SecureCredentialStore
+import com.v2rayops.client.data.storage.UserPreferencesDataStore
 import com.v2rayops.client.domain.model.VpnConfig
 import com.v2rayops.client.domain.repository.SubscriptionRepository
 import com.v2rayops.client.profiles.ProfileParser
@@ -14,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -26,6 +28,7 @@ class SubscriptionRepositoryImpl @Inject constructor(
     private val api: V2RayOpsClientApi,
     private val secureStore: SecureCredentialStore,
     private val profileParser: ProfileParser,
+    private val preferencesDataStore: UserPreferencesDataStore,
     private val dispatchers: AppDispatchers
 ) : SubscriptionRepository {
 
@@ -291,12 +294,14 @@ class SubscriptionRepositoryImpl @Inject constructor(
             ?: return@withContext AppResult.Failure(AppError.Authentication("No active customer code for heartbeat"))
 
         try {
+            val currentVersion = preferencesDataStore.remoteSettingsVersionFlow.first()
             val response = api.sendHeartbeat(
                 HeartbeatRequestDto(
                     code = code,
                     uploadBytes = uploadBytes,
                     downloadBytes = downloadBytes,
-                    deviceName = deviceName ?: "Android Device"
+                    deviceName = deviceName ?: "Android Device",
+                    currentSettingsVersion = currentVersion
                 )
             )
 
